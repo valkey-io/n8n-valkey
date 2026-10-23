@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output (n8n-node build)
+dist/
+*.tsbuildinfo
+
+# npm pack output
+*.tgz
+
+# Test coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local environment and secrets
+.env
+.env.*
+.tmp/
+.DS_Store
