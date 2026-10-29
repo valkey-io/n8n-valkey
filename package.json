@@ -1,0 +1,68 @@
+{
+    "name": "n8n-nodes-valkey-vector-store",
+    "version": "0.1.0",
+    "description": "n8n vector store node for Valkey with ValkeySearch (standalone, self-hosted n8n)",
+    "license": "MIT",
+    "homepage": "https://github.com/valkey-io/n8n-valkey",
+    "keywords": [
+        "n8n-community-node-package"
+    ],
+    "author": {
+        "name": "Victor Tsang",
+        "email": "vitsangp@amazon.com"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/valkey-io/n8n-valkey.git"
+    },
+    "scripts": {
+        "build": "n8n-node build",
+        "build:watch": "tsc --watch",
+        "dev": "n8n-node dev",
+        "lint": "n8n-node lint",
+        "lint:fix": "n8n-node lint --fix",
+        "test": "jest",
+        "test:unit": "jest --testPathIgnorePatterns /test/integration/",
+        "test:int": "jest test/integration",
+        "format": "prettier --write \"credentials/**/*.ts\" \"nodes/**/*.ts\" \"test/**/*.ts\"",
+        "format:check": "prettier --check \"credentials/**/*.ts\" \"nodes/**/*.ts\" \"test/**/*.ts\"",
+        "release": "n8n-node release",
+        "hooks:install": "git config core.hooksPath .githooks",
+        "prepublishOnly": "n8n-node prerelease"
+    },
+    "files": [
+        "dist"
+    ],
+    "n8n": {
+        "n8nNodesApiVersion": 1,
+        "strict": false,
+        "credentials": [
+            "dist/credentials/ValkeyApi.credentials.js"
+        ],
+        "nodes": [
+            "dist/nodes/ValkeyVectorStore/ValkeyVectorStore.node.js"
+        ]
+    },
+    "devDependencies": {
+        "@langchain/core": "1.2.8",
+        "@n8n/ai-utilities": "0.35.3",
+        "@n8n/node-cli": "*",
+        "@types/jest": "29.5.14",
+        "eslint": "9.32.0",
+        "jest": "29.7.0",
+        "n8n-workflow": "2.42.2",
+        "prettier": "3.6.2",
+        "release-it": "^21.1.0",
+        "ts-jest": "29.2.5",
+        "typescript": "5.9.2"
+    },
+    "peerDependencies": {
+        "@langchain/core": ">=1.0.0",
+        "@n8n/ai-utilities": ">=0.28.5",
+        "n8n-workflow": "*"
+    },
+    "dependencies": {
+        "@langchain/valkey": "file:vendor/langchain-valkey-0.0.1.tgz",
+        "@valkey/valkey-glide": "2.5.2"
+    }
+}

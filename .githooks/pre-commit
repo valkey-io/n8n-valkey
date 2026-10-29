@@ -1,0 +1,35 @@
+#!/bin/sh
+# Runs before every commit. Install it once per clone with `npm run hooks:install`,
+# which sets `git config core.hooksPath .githooks`.
+# Skip once with `git commit --no-verify`.
+set -e
+
+echo "pre-commit: npm run lint"
+npm run lint --silent
+
+echo "pre-commit: npm run format:check"
+npm run format:check --silent
+
+echo "pre-commit: npm run test:unit"
+npm run test:unit --silent
+
+# Integration tests run against a local Valkey with valkey-search, by default
+# localhost:6379. Set VALKEY_HOST / VALKEY_PORT (and the other VALKEY_* variables)
+# to use another server.
+export VALKEY_HOST="${VALKEY_HOST:-localhost}"
+export VALKEY_PORT="${VALKEY_PORT:-6379}"
+
+if ! node -e '
+	const socket = require("node:net").connect(Number(process.env.VALKEY_PORT), process.env.VALKEY_HOST);
+	socket.setTimeout(2000, () => process.exit(1));
+	socket.on("connect", () => { socket.end(); process.exit(0); });
+	socket.on("error", () => process.exit(1));
+'; then
+	echo "pre-commit: no Valkey server at $VALKEY_HOST:$VALKEY_PORT." >&2
+	echo "Start one (for example: docker run -p 6379:6379 valkey/valkey-search)," >&2
+	echo "set VALKEY_HOST/VALKEY_PORT, or skip the hook with git commit --no-verify." >&2
+	exit 1
+fi
+
+echo "pre-commit: npm run test:int ($VALKEY_HOST:$VALKEY_PORT)"
+npm run test:int --silent
