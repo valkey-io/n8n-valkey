@@ -9,7 +9,8 @@ export const sharedFields: INodeProperties[] = [
 		default: '',
 		required: true,
 		placeholder: 'e.g. my-docs',
-		description: 'Name of the search index. Insert creates it if it does not exist.',
+		description:
+			'Name of the search index. Insert creates it if it does not exist. A name containing ":" requires a Key Prefix.',
 	},
 ];
 
@@ -61,7 +62,7 @@ const indexOptionsField: INodeProperties = {
 			type: 'string',
 			default: '',
 			description:
-				'Prefix of the keys the documents are stored under. Leave empty to use doc:&lt;index name&gt;:.',
+				'Prefix of the keys the documents are stored under. Leave empty to use doc:&lt;index name&gt;:, which is not allowed when the index name contains ":".',
 		},
 		{
 			displayName: 'Metadata Key',

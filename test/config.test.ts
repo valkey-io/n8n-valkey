@@ -44,6 +44,30 @@ describe('readStoreConfig', () => {
 		expect(() => readStoreConfig(params({ valkeyIndex: ' ' }))).toThrow('Valkey Index is required');
 	});
 
+	it.each([undefined, '', '   '])(
+		'rejects an index name containing ":" when Key Prefix is %j',
+		(keyPrefix) => {
+			const read = () =>
+				readStoreConfig(params({ valkeyIndex: 'kb:archive', indexOptions: { keyPrefix } }));
+			expect(read).toThrow(expect.objectContaining({ code: 'invalid-parameter' }));
+			expect(read).toThrow('Valkey Index "kb:archive" contains ":"');
+		},
+	);
+
+	it('accepts an index name containing ":" when Key Prefix is set', () => {
+		expect(
+			readStoreConfig(
+				params({ valkeyIndex: 'idx:products', indexOptions: { keyPrefix: 'product:' } }),
+			),
+		).toMatchObject({ indexName: 'idx:products', keyPrefix: 'product:' });
+	});
+
+	it('gives indexes "kb" and "kb-archive" default prefixes that do not overlap', () => {
+		const live = readStoreConfig(params({ valkeyIndex: 'kb' })).keyPrefix;
+		const archive = readStoreConfig(params({ valkeyIndex: 'kb-archive' })).keyPrefix;
+		expect(archive.startsWith(live)).toBe(false);
+	});
+
 	it.each(['bad-key', 'bad.key', 'bad:key', 'bad key', 'bad\tkey', 'bad\nkey'])(
 		'rejects Metadata Key %j as an invalid parameter',
 		(metadataKey) => {

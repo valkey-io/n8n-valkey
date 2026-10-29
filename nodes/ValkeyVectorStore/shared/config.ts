@@ -126,9 +126,21 @@ export function readStoreConfig(get: ParamReader): StoreConfig {
 	const metadataKey = nonEmpty(options.metadataKey, 'metadata');
 	validateMetadataKey(metadataKey);
 
+	const keyPrefix = nonEmpty(options.keyPrefix, '');
+	// Valkey matches key prefixes as plain strings, so the default prefix of an
+	// index named "kb" (doc:kb:) would also cover the keys of "kb:archive"
+	// (doc:kb:archive:). Delete Index and Documents would then delete the other
+	// index's documents, and search would return them.
+	if (!keyPrefix && indexName.includes(':')) {
+		throw new ValkeyUserError(
+			`Valkey Index "${indexName}" contains ":", so its default key prefix "doc:${indexName}:" could overlap the key prefix of another index. Set Key Prefix, or remove the ":" from the index name.`,
+			'invalid-parameter',
+		);
+	}
+
 	return {
 		indexName,
-		keyPrefix: nonEmpty(options.keyPrefix, `doc:${indexName}:`),
+		keyPrefix: keyPrefix || `doc:${indexName}:`,
 		contentKey: nonEmpty(options.contentKey, 'content'),
 		metadataKey,
 		vectorKey: nonEmpty(options.vectorKey, 'content_vector'),
