@@ -219,6 +219,18 @@ export async function insertBatch(
 		);
 	}
 	const dimension = vectors[0].length;
+	// Check every vector, not only the first: a later empty, wrong-length or
+	// NaN vector would otherwise pass here and only fail in the library's
+	// write, after Delete Index and Documents has already deleted the index.
+	const invalidVectorIndex = vectors.findIndex(
+		(v) => v.length !== dimension || !v.every(Number.isFinite),
+	);
+	if (invalidVectorIndex !== -1) {
+		throw new ValkeyUserError(
+			`The embeddings model returned a vector of length ${vectors[invalidVectorIndex].length} for document ${invalidVectorIndex + 1}; expected ${dimension} finite numbers.`,
+			'embeddings-response',
+		);
+	}
 
 	let writing = false;
 	const client = await deps.openClient();

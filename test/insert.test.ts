@@ -85,6 +85,46 @@ describe('validateDocumentMetadata', () => {
 });
 
 describe('insertBatch', () => {
+	it.each([
+		['empty', [], 'length 0'],
+		['shorter', [0.1, 0.2], 'length 2'],
+		['NaN', [0.1, NaN, 0.3], 'length 3'],
+		['Infinity', [0.1, Infinity, 0.3], 'length 3'],
+	])(
+		'rejects a later %s vector before Delete Index and Documents deletes anything',
+		async (_label, badVector, length) => {
+			const { deps, events } = fakeDeps({ info: normalizeIndexInfo(HASH_INDEX) });
+			const openClient = jest.spyOn(deps, 'openClient');
+			const embed = {
+				embedDocuments: jest.fn(async () => [[0.1, 0.2, 0.3], badVector]),
+				embedQuery: jest.fn(),
+			};
+
+			await expect(
+				insertBatch({ ...baseConfig, clearIndex: true }, embed, docs(2), newInsertState(), deps),
+			).rejects.toMatchObject({
+				code: 'embeddings-response',
+				message: expect.stringContaining(`${length} for document 2; expected 3 finite numbers`),
+			});
+
+			expect(openClient).not.toHaveBeenCalled();
+			expect(deps.clear).not.toHaveBeenCalled();
+			expect(deps.addVectors).not.toHaveBeenCalled();
+			expect(events).toEqual([]);
+		},
+	);
+
+	it('accepts a batch whose vectors all have the same length', async () => {
+		const { deps, events } = fakeDeps();
+		await insertBatch(
+			{ ...baseConfig, clearIndex: true },
+			embeddings(3),
+			docs(3),
+			newInsertState(),
+			deps,
+		);
+		expect(events).toEqual(['clear', 'write:3']);
+	});
 	it('rejects an invalid Metadata Key before embedding, connecting, or clearing', async () => {
 		const { deps, events } = fakeDeps({ info: normalizeIndexInfo(HASH_INDEX) });
 		const openClient = jest.spyOn(deps, 'openClient');
