@@ -268,9 +268,32 @@ describe('parseCredentials', () => {
 			port: 6379,
 			username: undefined,
 			password: undefined,
-			tls: false,
+			tls: true,
 			database: 0,
 		});
+	});
+
+	it.each([
+		[true, true],
+		[false, false],
+		['true', true],
+		['false', false],
+		[' TRUE ', true],
+		['False', false],
+		['', true],
+	])('reads SSL/TLS %j as %p', (tls, expected) => {
+		expect(parseCredentials({ host: 'h', tls }).tls).toBe(expected);
+	});
+
+	it.each([
+		['yes', '"yes"'],
+		['1', '"1"'],
+		[1, '1'],
+		[{}, 'a value of type object'],
+	])('rejects SSL/TLS %j instead of connecting without TLS', (tls, shown) => {
+		const read = () => parseCredentials({ host: 'h', tls });
+		expect(read).toThrow(expect.objectContaining({ code: 'invalid-credential' }));
+		expect(read).toThrow(`The Valkey credential's SSL/TLS must be true or false, got ${shown}.`);
 	});
 
 	it('requires a host', () => {

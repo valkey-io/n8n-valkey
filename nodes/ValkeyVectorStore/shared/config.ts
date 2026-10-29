@@ -57,6 +57,34 @@ function nonEmpty(value: unknown, fallback: string): string {
 	return text === '' ? fallback : text;
 }
 
+/**
+ * A boolean field set by an expression arrives as a string, for example
+ * "true" from {{ $env.VALKEY_TLS }}. Accept "true"/"false" as well as real
+ * booleans, and reject anything else instead of treating it as false.
+ */
+function booleanFlag(
+	label: string,
+	value: unknown,
+	fallback: boolean,
+	code: ValkeyErrorCode,
+): boolean {
+	if (typeof value === 'boolean') return value;
+	if (value === undefined || value === null) return fallback;
+	if (typeof value === 'string') {
+		const text = value.trim().toLowerCase();
+		if (text === '') return fallback;
+		if (text === 'true') return true;
+		if (text === 'false') return false;
+	}
+	const shown =
+		typeof value === 'string'
+			? `"${value}"`
+			: typeof value === 'number'
+				? String(value)
+				: `a value of type ${typeof value}`;
+	throw new ValkeyUserError(`${label} must be true or false, got ${shown}.`, code);
+}
+
 /** Number() turns a blank field into 0 and "abc" into NaN with no error, so check explicitly. */
 function wholeNumber(label: string, value: unknown, rules: WholeNumberRules): number {
 	const { fallback, min, max = Number.MAX_SAFE_INTEGER, code } = rules;
@@ -89,7 +117,8 @@ export function parseCredentials(data: ICredentialDataDecryptedObject): ValkeyCr
 		}),
 		username: data.username ? String(data.username) : undefined,
 		password: data.password ? String(data.password) : undefined,
-		tls: data.tls === true,
+		// Defaults to true, like the credential's SSL/TLS toggle.
+		tls: booleanFlag("The Valkey credential's SSL/TLS", data.tls, true, 'invalid-credential'),
 		database: wholeNumber("The Valkey credential's Database Number", data.database, {
 			fallback: 0,
 			min: 0,
