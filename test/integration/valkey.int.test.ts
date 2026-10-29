@@ -194,25 +194,25 @@ describeIntegration('Valkey integration', () => {
 		expect(metadataFields(info!, 'metadata')).toEqual(expect.arrayContaining(declared));
 
 		const anyOf = await search(config, 'refund', 10, [
-			{ field: 'source|TAG', tagOperator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
+			{ field: 'source|TAG', operator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
 		]);
 		expect(anyOf.length).toBe(3);
 		anyOf.forEach(([d]) => expect(['billing.pdf', 'faq.pdf']).toContain(d.metadata.source));
 
 		const range = await search(config, 'refund', 10, [
-			{ field: 'year|NUMERIC', numericOperator: 'gte', value: '2024' },
+			{ field: 'year|NUMERIC', operator: 'gte', value: '2024' },
 		]);
 		expect(range.length).toBe(2);
 		range.forEach(([d]) => expect(d.metadata.year).toBeGreaterThanOrEqual(2024));
 
 		const combined = await search(config, 'refund', 10, [
-			{ field: 'source|TAG', tagOperator: 'is', value: 'billing.pdf' },
-			{ field: 'year|NUMERIC', numericOperator: 'between', value: '2023', valueTo: '2025' },
+			{ field: 'source|TAG', operator: 'is', value: 'billing.pdf' },
+			{ field: 'year|NUMERIC', operator: 'between', value: '2023', valueTo: '2025' },
 		]);
 		expect(combined.length).toBe(2);
 
 		const special = await search(config, 'x', 10, [
-			{ field: 'source|TAG', tagOperator: 'is', value: 'a-b.c@d e' },
+			{ field: 'source|TAG', operator: 'is', value: 'a-b.c@d e' },
 		]);
 		expect(special.map(([d]) => d.metadata.source)).toEqual(['a-b.c@d e']);
 
@@ -223,7 +223,7 @@ describeIntegration('Valkey integration', () => {
 		const config = insertConfig('tenant', { declaredFields: declared });
 		await insert(config, corpus);
 		const results = await search(config, 'show all customer invoices', 10, [
-			{ field: 'tenant', tagOperator: 'is', value: 'acme' },
+			{ field: 'tenant', operator: 'is', value: 'acme' },
 		]);
 		expect(results.length).toBe(3);
 		results.forEach(([d]) => expect(d.metadata.tenant).toBe('acme'));
@@ -247,7 +247,7 @@ describeIntegration('Valkey integration', () => {
 		expect(String(await client.hget(`${created.keyPrefix}2`, 'metadata.year'))).toBe('2024');
 
 		const acme = await search(created, 'first', 10, [
-			{ field: 'tenant', tagOperator: 'is', value: 'acme' },
+			{ field: 'tenant', operator: 'is', value: 'acme' },
 		]);
 		expect(acme.map(([d]) => d.pageContent).sort()).toEqual(['first, replaced', 'second']);
 	});
@@ -293,7 +293,7 @@ describeIntegration('Valkey integration', () => {
 		]);
 
 		const names = async (value: string) =>
-			(await search(config, 'x', 10, [{ field: 'tenant', tagOperator: 'is', value }]))
+			(await search(config, 'x', 10, [{ field: 'tenant', operator: 'is', value }]))
 				.map(([d]) => d.pageContent)
 				.sort();
 		expect(await names('acme')).toEqual(['acme only', 'shared']);
@@ -308,7 +308,7 @@ describeIntegration('Valkey integration', () => {
 			new Document({ pageContent: 'no year', metadata: { source: 'x' } }),
 		]);
 		const results = await search(config, 'no year', 10, [
-			{ field: 'year', numericOperator: 'gte', value: '0' },
+			{ field: 'year', operator: 'gte', value: '0' },
 		]);
 		expect(results.map(([d]) => d.pageContent)).not.toContain('no year');
 	});
@@ -560,11 +560,11 @@ describeIntegration('Valkey integration', () => {
 			expect(String(await client.hget(key, 'metadata.tenant'))).toBe('globex');
 			expect(await client.hexists(key, 'metadata.year')).toBe(false);
 			const byNew = await search(config, 'New answer', 10, [
-				{ field: 'tenant', tagOperator: 'is', value: 'globex' },
+				{ field: 'tenant', operator: 'is', value: 'globex' },
 			]);
 			expect(byNew.map(([d]) => d.metadata.doc_key)).toEqual(['faq-1']);
 			const byOld = await search(config, 'New answer', 10, [
-				{ field: 'year', numericOperator: 'gte', value: '0' },
+				{ field: 'year', operator: 'gte', value: '0' },
 			]);
 			expect(byOld).toHaveLength(0);
 		});

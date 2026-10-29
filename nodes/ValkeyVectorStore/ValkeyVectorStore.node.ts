@@ -30,7 +30,6 @@ import {
 	updateFields,
 } from './shared/descriptions';
 import { NO_DOCUMENTS_ERROR, ValkeyUserError, messageOf } from './shared/errors';
-import { encodeFieldOption } from './shared/filters';
 import { toHostVectorStore } from './shared/hostVectorStore';
 import { metadataFields, readIndexInfo } from './shared/indexSchema';
 import { defaultInsertDeps, insertBatch, newInsertState } from './shared/insert';
@@ -116,7 +115,7 @@ const VectorStoreValkeyBase = createVectorStoreNode<N8nValkeyVectorStore>({
 					if (!info) throw missingIndexError(config.indexName);
 					return metadataFields(info, config.metadataKey).map((field) => ({
 						name: `${field.name} (${field.type})`,
-						value: encodeFieldOption(field),
+						value: field.name,
 					}));
 				} catch (error) {
 					throw new NodeOperationError(this.getNode(), messageOf(error));

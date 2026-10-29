@@ -190,49 +190,35 @@ const metadataFilterField: INodeProperties = {
 						'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 				},
 				{
-					displayName: 'Field Type',
-					name: 'fieldType',
-					type: 'hidden',
-					default: "={{$parameter['&field' ].split('|')[1]}}",
-				},
-				{
 					displayName: 'Operator',
-					name: 'tagOperator',
+					name: 'operator',
 					type: 'options',
 					default: 'is',
-					displayOptions: { hide: { fieldType: ['NUMERIC'] } },
+					description:
+						'TAG fields use "Is" or "Is Any Of"; NUMERIC fields use the other operators. The run fails if the operator does not match the field\'s type in the index.',
 					options: [
 						{
-							name: 'Is',
-							value: 'is',
-						},
-						{
-							name: 'Is Any Of',
-							value: 'isAnyOf',
-						},
-					],
-				},
-				{
-					displayName: 'Operator',
-					name: 'numericOperator',
-					type: 'options',
-					default: 'gte',
-					displayOptions: { show: { fieldType: ['NUMERIC'] } },
-					options: [
-						{
-							name: 'Between',
+							name: 'Between (NUMERIC)',
 							value: 'between',
 						},
 						{
-							name: 'Equals',
+							name: 'Equals (NUMERIC)',
 							value: 'equals',
 						},
 						{
-							name: 'Greater Than or Equal',
+							name: 'Greater Than or Equal (NUMERIC)',
 							value: 'gte',
 						},
 						{
-							name: 'Less Than or Equal',
+							name: 'Is (TAG)',
+							value: 'is',
+						},
+						{
+							name: 'Is Any Of (TAG)',
+							value: 'isAnyOf',
+						},
+						{
+							name: 'Less Than or Equal (NUMERIC)',
 							value: 'lte',
 						},
 					],
@@ -242,7 +228,7 @@ const metadataFilterField: INodeProperties = {
 					name: 'valueTo',
 					type: 'string',
 					default: '',
-					displayOptions: { show: { fieldType: ['NUMERIC'], numericOperator: ['between'] } },
+					displayOptions: { show: { operator: ['between'] } },
 				},
 				{
 					displayName: 'Value',

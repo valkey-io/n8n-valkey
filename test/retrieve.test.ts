@@ -44,7 +44,7 @@ describe('buildRetrieveStore', () => {
 				client() as never,
 				config,
 				embeddings,
-				[{ field: 'category', tagOperator: 'is', value: 'x' }],
+				[{ field: 'category', operator: 'is', value: 'x' }],
 				async () => normalizeIndexInfo(HASH_INDEX),
 			),
 		).rejects.toThrow('"category" is not an indexed field');
@@ -88,7 +88,7 @@ describe('N8nValkeyVectorStore', () => {
 
 	it('always applies the configured filter and ignores the caller filter', async () => {
 		const { store, search } = await storeWithFilter([
-			{ field: 'source|TAG', tagOperator: 'is', value: 'acme.pdf' },
+			{ field: 'source|TAG', operator: 'is', value: 'acme.pdf' },
 		]);
 		const query = new Array(1536).fill(0);
 		// Retrievers and the tool wrapper pass their own filter argument.

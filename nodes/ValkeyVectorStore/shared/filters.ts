@@ -13,12 +13,51 @@ export type NumericOperator = (typeof NUMERIC_OPERATORS)[number];
 export const DEFAULT_TAG_OPERATOR: TagOperator = 'is';
 export const DEFAULT_NUMERIC_OPERATOR: NumericOperator = 'gte';
 
+/** Operator names as the Operator dropdown shows them, without the type suffix. */
+const OPERATOR_NAMES: Record<TagOperator | NumericOperator, string> = {
+	is: 'Is',
+	isAnyOf: 'Is Any Of',
+	equals: 'Equals',
+	gte: 'Greater Than or Equal',
+	lte: 'Less Than or Equal',
+	between: 'Between',
+};
+
+function operatorList(operators: readonly string[]): string {
+	const names = operators.map((op) => `"${OPERATOR_NAMES[op as TagOperator | NumericOperator]}"`);
+	return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+/**
+ * Returns the row's operator after checking it against the field's type in
+ * the index. The editor cannot know the type when Field is an expression, so
+ * this run-time check is the one that decides. A row without an operator
+ * uses the type's default.
+ */
+function readOperator(
+	row: FilterConditionRow,
+	type: MetadataFieldType,
+	label: string,
+	name: string,
+): string {
+	const allowed: readonly string[] = type === 'TAG' ? TAG_OPERATORS : NUMERIC_OPERATORS;
+	const fallback = type === 'TAG' ? DEFAULT_TAG_OPERATOR : DEFAULT_NUMERIC_OPERATOR;
+	const raw = row.operator;
+	const operator = raw === undefined || raw === null || raw === '' ? fallback : String(raw);
+	if (!allowed.includes(operator)) {
+		const shown = OPERATOR_NAMES[operator as TagOperator | NumericOperator] ?? operator;
+		throw new ValkeyUserError(
+			`${label}: operator "${shown}" is not valid for ${type} field "${name}". Use ${operatorList(allowed)}.`,
+			'invalid-filter',
+		);
+	}
+	return operator;
+}
+
 /** One row of the Metadata Filter list, as returned by getNodeParameter. */
 export interface FilterConditionRow {
 	field?: unknown;
-	fieldType?: unknown;
-	tagOperator?: unknown;
-	numericOperator?: unknown;
+	operator?: unknown;
 	value?: unknown;
 	valueTo?: unknown;
 }
@@ -26,18 +65,16 @@ export interface FilterConditionRow {
 export type NumericRange = { min?: number; max?: number };
 export type MetadataFilter = Record<string, string | string[] | NumericRange>;
 
-/** Separator between field name and type in the Field dropdown's option values. */
-export const FIELD_TYPE_SEPARATOR = '|';
-
-export function encodeFieldOption(field: MetadataField): string {
-	return `${field.name}${FIELD_TYPE_SEPARATOR}${field.type}`;
-}
-
-/** Accepts both `source|TAG` (picked from the list) and `source` (typed or from an expression). */
+/**
+ * Returns the field name of a filter row. Rows saved by earlier versions of
+ * the node stored the field as `name|TAG` or `name|NUMERIC`; that suffix is
+ * removed. Any other `|` is part of the name.
+ */
 export function decodeFieldName(value: unknown): string {
-	const text = String(value ?? '').trim();
-	const separator = text.lastIndexOf(FIELD_TYPE_SEPARATOR);
-	return separator === -1 ? text : text.slice(0, separator).trim();
+	return String(value ?? '')
+		.trim()
+		.replace(/\|(TAG|NUMERIC)$/, '')
+		.trim();
 }
 
 /**
@@ -119,13 +156,7 @@ export function buildMetadataFilter(
 		}
 
 		if (type === 'TAG') {
-			const operator = String(row.tagOperator ?? DEFAULT_TAG_OPERATOR);
-			if (!(TAG_OPERATORS as readonly string[]).includes(operator)) {
-				throw new ValkeyUserError(
-					`${label}: operator "${operator}" is not valid for TAG field "${name}". Use "is" or "is any of".`,
-					'invalid-filter',
-				);
-			}
+			const operator = readOperator(row, type, label, name);
 			if (name in filter) {
 				throw new ValkeyUserError(
 					`${label}: field "${name}" already has a condition. Combine the values into one "is any of" condition.`,
@@ -137,13 +168,7 @@ export function buildMetadataFilter(
 			return;
 		}
 
-		const operator = String(row.numericOperator ?? DEFAULT_NUMERIC_OPERATOR);
-		if (!(NUMERIC_OPERATORS as readonly string[]).includes(operator)) {
-			throw new ValkeyUserError(
-				`${label}: operator "${operator}" is not valid for NUMERIC field "${name}". Use "equals", "greater than or equal", "less than or equal" or "between".`,
-				'invalid-filter',
-			);
-		}
+		const operator = readOperator(row, type, label, name);
 
 		let range: NumericRange;
 		if (operator === 'equals') {

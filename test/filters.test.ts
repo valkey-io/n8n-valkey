@@ -1,7 +1,6 @@
 import {
 	buildMetadataFilter,
 	decodeFieldName,
-	encodeFieldOption,
 	toCustomSchema,
 } from '../nodes/ValkeyVectorStore/shared/filters';
 import type { MetadataField } from '../nodes/ValkeyVectorStore/shared/indexSchema';
@@ -14,13 +13,20 @@ const fields: MetadataField[] = [
 
 const build = (rows: object[]) => buildMetadataFilter(rows, fields, 'kb');
 
-describe('field option encoding', () => {
-	it('round-trips name|TYPE and accepts bare names', () => {
-		expect(encodeFieldOption({ name: 'source', type: 'TAG' })).toBe('source|TAG');
+describe('decodeFieldName', () => {
+	it('removes the type suffix of rows saved by earlier versions', () => {
 		expect(decodeFieldName('source|TAG')).toBe('source');
-		expect(decodeFieldName('source')).toBe('source');
+		expect(decodeFieldName('year|NUMERIC')).toBe('year');
+		expect(decodeFieldName(' source ')).toBe('source');
 	});
 
+	it('keeps any other "|" as part of the field name', () => {
+		expect(decodeFieldName('a|b')).toBe('a|b');
+		expect(decodeFieldName('a|TAGS')).toBe('a|TAGS');
+	});
+});
+
+describe('toCustomSchema', () => {
 	it('builds customSchema from index fields', () => {
 		expect(toCustomSchema(fields)).toEqual({
 			source: { type: 'TAG' },
@@ -48,19 +54,19 @@ describe('buildMetadataFilter', () => {
 	});
 
 	it.each([
-		[{ field: 'source|TAG', tagOperator: 'is', value: 'faq.pdf' }, { source: 'faq.pdf' }],
+		[{ field: 'source|TAG', operator: 'is', value: 'faq.pdf' }, { source: 'faq.pdf' }],
 		[
-			{ field: 'source|TAG', tagOperator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
+			{ field: 'source|TAG', operator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
 			{ source: ['billing.pdf', 'faq.pdf'] },
 		],
 		[
-			{ field: 'year|NUMERIC', numericOperator: 'equals', value: '2024' },
+			{ field: 'year|NUMERIC', operator: 'equals', value: '2024' },
 			{ year: { min: 2024, max: 2024 } },
 		],
-		[{ field: 'year|NUMERIC', numericOperator: 'gte', value: '2024' }, { year: { min: 2024 } }],
-		[{ field: 'year|NUMERIC', numericOperator: 'lte', value: 2024 }, { year: { max: 2024 } }],
+		[{ field: 'year|NUMERIC', operator: 'gte', value: '2024' }, { year: { min: 2024 } }],
+		[{ field: 'year|NUMERIC', operator: 'lte', value: 2024 }, { year: { max: 2024 } }],
 		[
-			{ field: 'year|NUMERIC', numericOperator: 'between', value: '2023', valueTo: '2025' },
+			{ field: 'year|NUMERIC', operator: 'between', value: '2023', valueTo: '2025' },
 			{ year: { min: 2023, max: 2025 } },
 		],
 	])('maps %j', (row, expected) => {
@@ -75,8 +81,8 @@ describe('buildMetadataFilter', () => {
 	it('ANDs conditions on different fields', () => {
 		expect(
 			build([
-				{ field: 'source|TAG', tagOperator: 'is', value: 'billing.pdf' },
-				{ field: 'year|NUMERIC', numericOperator: 'between', value: '2023', valueTo: '2025' },
+				{ field: 'source|TAG', operator: 'is', value: 'billing.pdf' },
+				{ field: 'year|NUMERIC', operator: 'between', value: '2023', valueTo: '2025' },
 			]),
 		).toEqual({ source: 'billing.pdf', year: { min: 2023, max: 2025 } });
 	});
@@ -84,46 +90,71 @@ describe('buildMetadataFilter', () => {
 	it('intersects NUMERIC conditions on the same field', () => {
 		expect(
 			build([
-				{ field: 'year', numericOperator: 'gte', value: '2020' },
-				{ field: 'year', numericOperator: 'lte', value: '2024' },
+				{ field: 'year', operator: 'gte', value: '2020' },
+				{ field: 'year', operator: 'lte', value: '2024' },
 			]),
 		).toEqual({ year: { min: 2020, max: 2024 } });
 	});
 
 	it('accepts array values from expressions', () => {
-		expect(build([{ field: 'tenant', tagOperator: 'isAnyOf', value: ['acme', 'globex'] }])).toEqual(
-			{
-				tenant: ['acme', 'globex'],
-			},
-		);
+		expect(build([{ field: 'tenant', operator: 'isAnyOf', value: ['acme', 'globex'] }])).toEqual({
+			tenant: ['acme', 'globex'],
+		});
 	});
 
 	it('rejects a field that is not indexed, including from an expression', () => {
-		expect(() => build([{ field: 'category', tagOperator: 'is', value: 'x' }])).toThrow(
+		expect(() => build([{ field: 'category', operator: 'is', value: 'x' }])).toThrow(
 			'"category" is not an indexed field of index "kb"',
 		);
 	});
 
 	it('rejects an operator of the wrong type', () => {
-		expect(() => build([{ field: 'source', tagOperator: 'gte', value: 'x' }])).toThrow(
-			'operator "gte" is not valid for TAG field "source"',
+		expect(() => build([{ field: 'source', operator: 'gte', value: 'x' }])).toThrow(
+			'operator "Greater Than or Equal" is not valid for TAG field "source". Use "Is" or "Is Any Of".',
 		);
-		expect(() => build([{ field: 'year', numericOperator: 'isAnyOf', value: '1' }])).toThrow(
-			'operator "isAnyOf" is not valid for NUMERIC field "year"',
+		expect(() => build([{ field: 'year', operator: 'isAnyOf', value: '1' }])).toThrow(
+			'operator "Is Any Of" is not valid for NUMERIC field "year". Use "Equals", "Greater Than or Equal", "Less Than or Equal" or "Between".',
 		);
+	});
+
+	it('rejects "Is" on a NUMERIC field given by an expression, instead of running ">="', () => {
+		const run = () => build([{ field: 'year', operator: 'is', value: '2024' }]);
+		expect(run).toThrow(expect.objectContaining({ code: 'invalid-filter' }));
+		expect(run).toThrow('operator "Is" is not valid for NUMERIC field "year"');
+	});
+
+	it('rejects an unknown operator', () => {
+		expect(() => build([{ field: 'source', operator: 'contains', value: 'x' }])).toThrow(
+			'operator "contains" is not valid for TAG field "source"',
+		);
+	});
+
+	it.each([undefined, null, ''])('uses the type default when the operator is %j', (operator) => {
+		expect(
+			build([
+				{ field: 'source', operator, value: 'a' },
+				{ field: 'year', operator, value: '2024' },
+			]),
+		).toEqual({ source: 'a', year: { min: 2024 } });
+	});
+
+	it('accepts a field saved as "name|TYPE" by earlier versions', () => {
+		expect(build([{ field: 'year|NUMERIC', operator: 'equals', value: '2024' }])).toEqual({
+			year: { min: 2024, max: 2024 },
+		});
 	});
 
 	it('rejects a non-numeric NUMERIC value', () => {
-		expect(() => build([{ field: 'year', numericOperator: 'gte', value: 'abc' }])).toThrow(
+		expect(() => build([{ field: 'year', operator: 'gte', value: 'abc' }])).toThrow(
 			'the value must be a number, got "abc"',
 		);
-		expect(() =>
-			build([{ field: 'year', numericOperator: 'between', value: '1', valueTo: '' }]),
-		).toThrow('must be a number');
+		expect(() => build([{ field: 'year', operator: 'between', value: '1', valueTo: '' }])).toThrow(
+			'must be a number',
+		);
 	});
 
 	it('rejects an empty TAG value', () => {
-		expect(() => build([{ field: 'source', tagOperator: 'isAnyOf', value: ' , ' }])).toThrow(
+		expect(() => build([{ field: 'source', operator: 'isAnyOf', value: ' , ' }])).toThrow(
 			'the value is empty',
 		);
 	});
@@ -131,8 +162,8 @@ describe('buildMetadataFilter', () => {
 	it('rejects two TAG conditions on one field', () => {
 		expect(() =>
 			build([
-				{ field: 'source', tagOperator: 'is', value: 'a' },
-				{ field: 'source', tagOperator: 'is', value: 'b' },
+				{ field: 'source', operator: 'is', value: 'a' },
+				{ field: 'source', operator: 'is', value: 'b' },
 			]),
 		).toThrow('already has a condition');
 	});
@@ -140,8 +171,8 @@ describe('buildMetadataFilter', () => {
 	it('rejects NUMERIC conditions that can never match', () => {
 		expect(() =>
 			build([
-				{ field: 'year', numericOperator: 'gte', value: '2025' },
-				{ field: 'year', numericOperator: 'lte', value: '2020' },
+				{ field: 'year', operator: 'gte', value: '2025' },
+				{ field: 'year', operator: 'lte', value: '2020' },
 			]),
 		).toThrow('can never match');
 	});
