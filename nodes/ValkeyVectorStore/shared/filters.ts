@@ -66,18 +66,6 @@ export type NumericRange = { min?: number; max?: number };
 export type MetadataFilter = Record<string, string | string[] | NumericRange>;
 
 /**
- * Returns the field name of a filter row. Rows saved by earlier versions of
- * the node stored the field as `name|TAG` or `name|NUMERIC`; that suffix is
- * removed. Any other `|` is part of the name.
- */
-export function decodeFieldName(value: unknown): string {
-	return String(value ?? '')
-		.trim()
-		.replace(/\|(TAG|NUMERIC)$/, '')
-		.trim();
-}
-
-/**
  * customSchema for the library, built from the index's own TAG/NUMERIC fields.
  * A TAG field's separator decides how the library joins array values.
  */
@@ -140,7 +128,7 @@ export function buildMetadataFilter(
 	const filter: MetadataFilter = {};
 
 	rows.forEach((row, index) => {
-		const name = decodeFieldName(row.field);
+		const name = String(row.field ?? '').trim();
 		const label = `Metadata Filter condition ${index + 1}${name ? ` ("${name}")` : ''}`;
 
 		if (!name) throw new ValkeyUserError(`${label}: no field selected.`, 'invalid-filter');

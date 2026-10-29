@@ -1,8 +1,4 @@
-import {
-	buildMetadataFilter,
-	decodeFieldName,
-	toCustomSchema,
-} from '../nodes/ValkeyVectorStore/shared/filters';
+import { buildMetadataFilter, toCustomSchema } from '../nodes/ValkeyVectorStore/shared/filters';
 import type { MetadataField } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 
 const fields: MetadataField[] = [
@@ -12,19 +8,6 @@ const fields: MetadataField[] = [
 ];
 
 const build = (rows: object[]) => buildMetadataFilter(rows, fields, 'kb');
-
-describe('decodeFieldName', () => {
-	it('removes the type suffix of rows saved by earlier versions', () => {
-		expect(decodeFieldName('source|TAG')).toBe('source');
-		expect(decodeFieldName('year|NUMERIC')).toBe('year');
-		expect(decodeFieldName(' source ')).toBe('source');
-	});
-
-	it('keeps any other "|" as part of the field name', () => {
-		expect(decodeFieldName('a|b')).toBe('a|b');
-		expect(decodeFieldName('a|TAGS')).toBe('a|TAGS');
-	});
-});
 
 describe('toCustomSchema', () => {
 	it('builds customSchema from index fields', () => {
@@ -54,19 +37,16 @@ describe('buildMetadataFilter', () => {
 	});
 
 	it.each([
-		[{ field: 'source|TAG', operator: 'is', value: 'faq.pdf' }, { source: 'faq.pdf' }],
+		[{ field: 'source', operator: 'is', value: 'faq.pdf' }, { source: 'faq.pdf' }],
 		[
-			{ field: 'source|TAG', operator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
+			{ field: 'source', operator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
 			{ source: ['billing.pdf', 'faq.pdf'] },
 		],
+		[{ field: 'year', operator: 'equals', value: '2024' }, { year: { min: 2024, max: 2024 } }],
+		[{ field: 'year', operator: 'gte', value: '2024' }, { year: { min: 2024 } }],
+		[{ field: 'year', operator: 'lte', value: 2024 }, { year: { max: 2024 } }],
 		[
-			{ field: 'year|NUMERIC', operator: 'equals', value: '2024' },
-			{ year: { min: 2024, max: 2024 } },
-		],
-		[{ field: 'year|NUMERIC', operator: 'gte', value: '2024' }, { year: { min: 2024 } }],
-		[{ field: 'year|NUMERIC', operator: 'lte', value: 2024 }, { year: { max: 2024 } }],
-		[
-			{ field: 'year|NUMERIC', operator: 'between', value: '2023', valueTo: '2025' },
+			{ field: 'year', operator: 'between', value: '2023', valueTo: '2025' },
 			{ year: { min: 2023, max: 2025 } },
 		],
 	])('maps %j', (row, expected) => {
@@ -74,15 +54,19 @@ describe('buildMetadataFilter', () => {
 	});
 
 	it('uses the type default operator when none is stored', () => {
-		expect(build([{ field: 'source|TAG', value: 'a' }])).toEqual({ source: 'a' });
-		expect(build([{ field: 'year|NUMERIC', value: '1' }])).toEqual({ year: { min: 1 } });
+		expect(build([{ field: 'source', value: 'a' }])).toEqual({ source: 'a' });
+		expect(build([{ field: 'year', value: '1' }])).toEqual({ year: { min: 1 } });
+	});
+
+	it('trims the field name', () => {
+		expect(build([{ field: ' source ', value: 'a' }])).toEqual({ source: 'a' });
 	});
 
 	it('ANDs conditions on different fields', () => {
 		expect(
 			build([
-				{ field: 'source|TAG', operator: 'is', value: 'billing.pdf' },
-				{ field: 'year|NUMERIC', operator: 'between', value: '2023', valueTo: '2025' },
+				{ field: 'source', operator: 'is', value: 'billing.pdf' },
+				{ field: 'year', operator: 'between', value: '2023', valueTo: '2025' },
 			]),
 		).toEqual({ source: 'billing.pdf', year: { min: 2023, max: 2025 } });
 	});
@@ -94,6 +78,18 @@ describe('buildMetadataFilter', () => {
 				{ field: 'year', operator: 'lte', value: '2024' },
 			]),
 		).toEqual({ year: { min: 2020, max: 2024 } });
+		expect(
+			build([
+				{ field: 'year', operator: 'gte', value: '2020' },
+				{ field: 'year', operator: 'gte', value: '2022' },
+			]),
+		).toEqual({ year: { min: 2022 } });
+		expect(
+			build([
+				{ field: 'year', operator: 'lte', value: '2024' },
+				{ field: 'year', operator: 'lte', value: '2021' },
+			]),
+		).toEqual({ year: { max: 2021 } });
 	});
 
 	it('accepts array values from expressions', () => {
@@ -136,12 +132,6 @@ describe('buildMetadataFilter', () => {
 				{ field: 'year', operator, value: '2024' },
 			]),
 		).toEqual({ source: 'a', year: { min: 2024 } });
-	});
-
-	it('accepts a field saved as "name|TYPE" by earlier versions', () => {
-		expect(build([{ field: 'year|NUMERIC', operator: 'equals', value: '2024' }])).toEqual({
-			year: { min: 2024, max: 2024 },
-		});
 	});
 
 	it('rejects a non-numeric NUMERIC value', () => {
