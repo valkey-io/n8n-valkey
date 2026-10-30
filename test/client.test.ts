@@ -1,6 +1,6 @@
 import { isClusterEnabled, createValkeyClient } from '../nodes/ValkeyVectorStore/shared/client';
 import { parseCredentials } from '../nodes/ValkeyVectorStore/shared/config';
-import { CLUSTER_MODE_ERROR, classifyFtError } from '../nodes/ValkeyVectorStore/shared/errors';
+import { CLUSTER_MODE_ERROR } from '../nodes/ValkeyVectorStore/shared/errors';
 
 function fakeClient(infoReply: string | Error) {
 	return {
@@ -43,18 +43,5 @@ describe('createValkeyClient', () => {
 			'NOAUTH',
 		);
 		expect(client.close).toHaveBeenCalled();
-	});
-});
-
-describe('classifyFtError', () => {
-	it.each([
-		["Index with name 'x' not found", 'index-missing'],
-		['Unknown Index name', 'index-missing'],
-		["ERR unknown command 'FT.INFO'", 'search-module-missing'],
-		['Index already exists', 'index-exists'],
-		["NOPERM User u has no permissions to run the 'FT.INFO' command", 'other'],
-		['timed out', 'other'],
-	])('%s -> %s', (message, kind) => {
-		expect(classifyFtError(new Error(message))).toBe(kind);
 	});
 });

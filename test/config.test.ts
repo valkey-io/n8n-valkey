@@ -111,12 +111,15 @@ describe('readInsertConfig', () => {
 		).toMatchObject({ ttl: 3600, algorithm: 'FLAT', clearIndex: true, declaredFields: [] });
 	});
 
-	it('treats TTL 0 as no expiry and defaults to HNSW', () => {
+	it('treats a missing or 0 TTL as no expiry and defaults to HNSW', () => {
 		expect(readInsertConfig(params({ valkeyIndex: 'kb' }))).toMatchObject({
 			ttl: undefined,
 			algorithm: 'HNSW',
 			clearIndex: false,
 		});
+		expect(
+			readInsertConfig(params({ valkeyIndex: 'kb', insertOptions: { ttl: 0 } })).ttl,
+		).toBeUndefined();
 	});
 
 	it('uses the default for a blank TTL and accepts a numeric string', () => {
@@ -249,6 +252,9 @@ describe('readDeclaredFields', () => {
 		expect(() =>
 			readDeclaredFields(params({ metadataFields: { fields: [{ name: 'user type' }] } })),
 		).toThrow('contains " "');
+		expect(
+			readDeclaredFields(params({ metadataFields: { fields: [{ name: '  user_type  ' }] } })),
+		).toEqual([{ name: 'user_type', type: 'TAG' }]);
 	});
 
 	it.each(['user_type', 'Tenant_ID', '_private', '2024_total', 'café', '日本語', 'a`b'])(

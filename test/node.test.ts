@@ -1,9 +1,11 @@
 import { N8nJsonLoader } from '@n8n/ai-utilities';
+import { GlideClient, GlideFt } from '@valkey/valkey-glide';
 import { NodeOperationError } from 'n8n-workflow';
 import type { INodePropertyCollection } from 'n8n-workflow';
 
 import { ValkeyVectorStore } from '../nodes/ValkeyVectorStore/ValkeyVectorStore.node';
 import { NO_DOCUMENTS_ERROR } from '../nodes/ValkeyVectorStore/shared/errors';
+import { HASH_INDEX } from './fixtures/ftInfo';
 
 /** Minimal IExecuteFunctions for the factory's insert path with no input items. */
 function insertContext(items: unknown[] = []) {
@@ -104,17 +106,23 @@ describe('ValkeyVectorStore node', () => {
 			return modes === undefined || modes.includes(mode);
 		};
 		const order = (mode: string) => props.filter((p) => shownIn(p, mode)).map((p) => p.name);
+		/** Fails if either property is missing, so a removed property cannot pass as "before". */
+		const expectBefore = (mode: string, first: string, second: string) => {
+			const names = order(mode);
+			expect(names).toContain(first);
+			expect(names).toContain(second);
+			expect(names.indexOf(first)).toBeLessThan(names.indexOf(second));
+		};
 		for (const mode of ['insert', 'load', 'retrieve', 'retrieve-as-tool', 'update']) {
 			expect(order(mode).filter((n) => n === 'indexOptions')).toHaveLength(1);
-			expect(order(mode).indexOf('valkeyIndex')).toBeLessThan(order(mode).indexOf('indexOptions'));
+			expectBefore(mode, 'valkeyIndex', 'indexOptions');
 		}
-		const load = order('load');
-		expect(load.indexOf('prompt')).toBeLessThan(load.indexOf('indexOptions'));
-		expect(load.indexOf('topK')).toBeLessThan(load.indexOf('indexOptions'));
-		expect(load.indexOf('indexOptions')).toBeLessThan(load.indexOf('metadataFilter'));
-		const update = order('update');
-		expect(update.indexOf('id')).toBeLessThan(update.indexOf('indexOptions'));
-		expect(update.indexOf('indexOptions')).toBeLessThan(update.indexOf('jsonData'));
+		expectBefore('load', 'prompt', 'indexOptions');
+		expectBefore('load', 'topK', 'indexOptions');
+		expectBefore('load', 'indexOptions', 'metadataFilter');
+		expectBefore('retrieve-as-tool', 'topK', 'indexOptions');
+		expectBefore('update', 'id', 'indexOptions');
+		expectBefore('update', 'indexOptions', 'jsonData');
 	});
 
 	it('declares the Valkey credential with a connection test', () => {
@@ -124,7 +132,7 @@ describe('ValkeyVectorStore node', () => {
 		expect(node.methods?.credentialTest?.valkeyApiConnectionTest).toBeInstanceOf(Function);
 	});
 
-	it('loads the Metadata Filter field list from the index', () => {
+	it('loads the Metadata Filter field list with getFilterFields', () => {
 		const filter = node.description.properties.find((p) => p.name === 'metadataFilter');
 		const conditions = (filter?.options as INodePropertyCollection[] | undefined)?.find(
 			(o) => o.name === 'conditions',
@@ -133,6 +141,61 @@ describe('ValkeyVectorStore node', () => {
 		const method = field?.typeOptions?.loadOptionsMethod;
 		expect(method).toBe('getFilterFields');
 		expect(node.methods?.loadOptions?.[method as string]).toBeInstanceOf(Function);
+	});
+
+	describe('getFilterFields', () => {
+		const getFilterFields = node.methods!.loadOptions!.getFilterFields;
+		/** A connected standalone server; FT.INFO is stubbed separately. */
+		const fakeClient = {
+			info: jest.fn(async () => 'cluster_enabled:0\r\n'),
+			close: jest.fn(),
+		};
+		let createClient: jest.SpyInstance;
+		let ftInfo: jest.SpyInstance;
+
+		/** Minimal ILoadOptionsFunctions: the node parameters the dropdown is opened with. */
+		function loadOptionsContext(parameters: Record<string, unknown>) {
+			return {
+				getNode: () => ({ name: 'Valkey Vector Store' }),
+				getCurrentNodeParameter: (name: string) => parameters[name],
+				getCredentials: async () => ({ host: 'localhost', tls: false }),
+			};
+		}
+
+		beforeEach(() => {
+			fakeClient.close.mockClear();
+			createClient = jest.spyOn(GlideClient, 'createClient').mockResolvedValue(fakeClient as never);
+			ftInfo = jest.spyOn(GlideFt, 'info').mockResolvedValue(HASH_INDEX as never);
+		});
+
+		afterEach(() => jest.restoreAllMocks());
+
+		it('lists the index metadata fields, labelled with their type and valued by bare name', async () => {
+			const context = loadOptionsContext({ valkeyIndex: 'kb' });
+			await expect(getFilterFields.call(context as never)).resolves.toEqual([
+				{ name: 'source (TAG)', value: 'source' },
+				{ name: 'year (NUMERIC)', value: 'year' },
+			]);
+			expect(ftInfo).toHaveBeenCalledWith(fakeClient, 'kb');
+			expect(fakeClient.close).toHaveBeenCalledTimes(1);
+		});
+
+		it('fails with a clear error and closes the client when the index does not exist', async () => {
+			ftInfo.mockRejectedValue(new Error("Index with name 'kb' not found"));
+			const context = loadOptionsContext({ valkeyIndex: 'kb' });
+			const error = await getFilterFields.call(context as never).catch((e: Error) => e);
+			expect(error).toBeInstanceOf(NodeOperationError);
+			expect((error as Error).message).toContain('Index "kb" does not exist');
+			expect(fakeClient.close).toHaveBeenCalledTimes(1);
+		});
+
+		it('fails before connecting when the index name is missing', async () => {
+			const context = loadOptionsContext({ valkeyIndex: '' });
+			await expect(getFilterFields.call(context as never)).rejects.toThrow(
+				'Valkey Index is required',
+			);
+			expect(createClient).not.toHaveBeenCalled();
+		});
 	});
 
 	it('never offers TEXT for metadata fields', () => {

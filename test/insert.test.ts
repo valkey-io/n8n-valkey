@@ -12,7 +12,7 @@ import {
 	validateDocumentMetadata,
 } from '../nodes/ValkeyVectorStore/shared/insert';
 import type { InsertDeps } from '../nodes/ValkeyVectorStore/shared/insert';
-import { HASH_INDEX } from './indexSchema.test';
+import { HASH_INDEX } from './fixtures/ftInfo';
 
 const baseConfig: InsertConfig = {
 	indexName: 'kb',
@@ -370,7 +370,7 @@ describe('insertBatch writes the metadata fields of an existing index', () => {
 		expect(written).toEqual([SOURCE_AND_YEAR]);
 	});
 
-	it('writes all indexed fields when replacing a document by ID', async () => {
+	it('writes all indexed fields when ID Metadata Field is set', async () => {
 		const { deps, written } = capturing(normalizeIndexInfo(HASH_INDEX));
 		const config = { ...baseConfig, idField: 'doc_key' };
 		const doc = new Document({

@@ -6,47 +6,7 @@ import {
 } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import type { CompatibilityConfig } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import { SEARCH_MODULE_MISSING } from '../nodes/ValkeyVectorStore/shared/errors';
-
-/**
- * Provisional fixtures in the shape Glide documents for GlideFt.info.
- * Task 3.1 replaces them with replies recorded from a real ValkeySearch server.
- */
-export const HASH_INDEX = {
-	index_name: 'kb',
-	index_status: 'AVAILABLE',
-	key_type: 'HASH',
-	key_prefixes: ['doc:kb:'],
-	num_docs: 3,
-	fields: [
-		{
-			identifier: 'content_vector',
-			type: 'VECTOR',
-			field_name: 'content_vector',
-			option: '',
-			vector_params: {
-				data_type: 'FLOAT32',
-				distance_metric: 'COSINE',
-				dimension: 1536,
-				algorithm: 'HNSW',
-			},
-		},
-		{ identifier: 'metadata.source', type: 'TAG', field_name: 'metadata.source', option: '' },
-		{ identifier: 'metadata.year', type: 'NUMERIC', field_name: 'metadata.year', option: '' },
-	],
-};
-
-export const JSON_INDEX = {
-	...HASH_INDEX,
-	key_type: 'JSON',
-	fields: [
-		{
-			identifier: '$.vec',
-			type: 'VECTOR',
-			field_name: 'VEC',
-			vector_params: { distance_metric: 'L2', dimension: 6, algorithm: 'FLAT' },
-		},
-	],
-};
+import { HASH_INDEX, JSON_INDEX, RECORDED_HASH_INDEX } from './fixtures/ftInfo';
 
 const config: CompatibilityConfig = {
 	indexName: 'kb',
@@ -54,57 +14,6 @@ const config: CompatibilityConfig = {
 	vectorKey: 'content_vector',
 	metadataKey: 'metadata',
 	metric: 'COSINE',
-};
-
-/**
- * Recorded from valkey/valkey-bundle:latest (Valkey 9.1.2, search 1.2.1) via
- * GlideFt.info, 2026-10-08. Glide passes the server's flat key/value arrays
- * through for index_definition, each attribute and the vector index block.
- */
-export const RECORDED_HASH_INDEX = {
-	index_name: 'probe5',
-	index_definition: ['key_type', 'HASH', 'prefixes', ['probe5:'], 'default_score', '1'],
-	attributes: [
-		[
-			'identifier',
-			'metadata.year',
-			'attribute',
-			'metadata_year',
-			'user_indexed_memory',
-			0,
-			'type',
-			'NUMERIC',
-			'size',
-			'0',
-		],
-		[
-			'identifier',
-			'v',
-			'attribute',
-			'v',
-			'user_indexed_memory',
-			0,
-			'type',
-			'VECTOR',
-			'index',
-			[
-				'capacity',
-				10240,
-				'dimensions',
-				4,
-				'distance_metric',
-				'COSINE',
-				'size',
-				'0',
-				'data_type',
-				'FLOAT32',
-				'algorithm',
-				['name', 'HNSW', 'm', 16, 'ef_construction', 200, 'ef_runtime', 10],
-			],
-		],
-	],
-	num_docs: 0,
-	state: 'ready',
 };
 
 describe('normalizeIndexInfo', () => {
@@ -323,11 +232,14 @@ describe('assertCompatible', () => {
 		);
 	});
 
-	it('rejects a dimension mismatch on insert, naming both dimensions', () => {
-		expect(() => assertCompatible(info, { ...config, dimension: 768 }, 'insert')).toThrow(
-			'dimension 1536, but the connected embeddings produce 768',
-		);
-	});
+	it.each(['insert', 'retrieve'] as const)(
+		'rejects a dimension mismatch on %s, naming both dimensions',
+		(mode) => {
+			expect(() => assertCompatible(info, { ...config, dimension: 768 }, mode)).toThrow(
+				'dimension 1536, but the connected embeddings produce 768',
+			);
+		},
+	);
 
 	it('rejects a missing declared field on insert', () => {
 		expect(() =>

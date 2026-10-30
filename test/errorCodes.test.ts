@@ -2,7 +2,7 @@ import { Document } from '@langchain/core/documents';
 
 import { parseCredentials } from '../nodes/ValkeyVectorStore/shared/config';
 import { clearIndex } from '../nodes/ValkeyVectorStore/shared/clearIndex';
-import { ValkeyUserError } from '../nodes/ValkeyVectorStore/shared/errors';
+import { ValkeyUserError, classifyFtError } from '../nodes/ValkeyVectorStore/shared/errors';
 import { buildMetadataFilter } from '../nodes/ValkeyVectorStore/shared/filters';
 import {
 	assertCompatible,
@@ -11,7 +11,7 @@ import {
 } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import { validateDocumentMetadata } from '../nodes/ValkeyVectorStore/shared/insert';
 import { missingIndexError } from '../nodes/ValkeyVectorStore/shared/retrieve';
-import { HASH_INDEX } from './indexSchema.test';
+import { HASH_INDEX } from './fixtures/ftInfo';
 
 /** Runs fn and returns the ValkeyUserError it throws. */
 function thrown(fn: () => unknown): ValkeyUserError {
@@ -30,7 +30,7 @@ describe('ValkeyUserError codes', () => {
 	});
 
 	it('tags an invalid filter', () => {
-		const rows = [{ field: 'nope|TAG', operator: 'is', value: 'x' }];
+		const rows = [{ field: 'nope', operator: 'is', value: 'x' }];
 		expect(thrown(() => buildMetadataFilter(rows as never, [], 'kb')).code).toBe('invalid-filter');
 	});
 
@@ -61,5 +61,18 @@ describe('ValkeyUserError codes', () => {
 		await expect(clearIndex({} as never, 'kb', [''])).rejects.toMatchObject({
 			code: 'clear-index-failed',
 		});
+	});
+});
+
+describe('classifyFtError', () => {
+	it.each([
+		["Index with name 'x' not found", 'index-missing'],
+		['Unknown Index name', 'index-missing'],
+		["ERR unknown command 'FT.INFO'", 'search-module-missing'],
+		['Index already exists', 'index-exists'],
+		["NOPERM User u has no permissions to run the 'FT.INFO' command", 'other'],
+		['timed out', 'other'],
+	])('%s -> %s', (message, kind) => {
+		expect(classifyFtError(new Error(message))).toBe(kind);
 	});
 });

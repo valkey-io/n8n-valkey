@@ -1,6 +1,3 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import { Document } from '@langchain/core/documents';
 import { N8nJsonLoader } from '@n8n/ai-utilities';
 import { VectorAlgorithms } from '@langchain/valkey';
@@ -134,11 +131,12 @@ describeIntegration('Valkey integration', () => {
 		await expect(readIndexInfo(client, 'n8n-test-does-not-exist')).resolves.toBeNull();
 	});
 
-	it('rejects a wrong password with the server error', async () => {
-		if (!process.env.VALKEY_PASSWORD) return; // server has no password configured
+	const itWithPassword = process.env.VALKEY_PASSWORD ? it : it.skip;
+
+	itWithPassword('rejects a wrong password with the server error', async () => {
 		await expect(
 			createValkeyClient({ ...testCredentials(), password: 'wrong-password' }),
-		).rejects.toThrow();
+		).rejects.toThrow(/WRONGPASS/);
 	});
 
 	it('inserts without TEXT fields and round-trips content and metadata', async () => {
@@ -153,20 +151,7 @@ describeIntegration('Valkey integration', () => {
 		expect(doc.metadata).toEqual({ source: 'faq.pdf', page: 4 });
 	});
 
-	it('records FT.INFO fixtures when RECORD_FIXTURES=1', async () => {
-		if (process.env.RECORD_FIXTURES !== '1') return;
-		const config = insertConfig('fixture', { declaredFields: declared });
-		await insert(config, corpus);
-		const raw = await GlideFt.info(client, config.indexName);
-		const dir = join(__dirname, '..', 'fixtures');
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(
-			join(dir, 'ft-info-hash.json'),
-			JSON.stringify(raw, (_k, v) => (Buffer.isBuffer(v) ? v.toString() : v), 2),
-		);
-	});
-
-	it('Get Many returns documents ordered by similarity with scores', async () => {
+	it('search returns documents ordered by similarity with scores', async () => {
 		const config = insertConfig('order');
 		await insert(config, corpus);
 		const results = await search(config, corpus[0].pageContent, 4);
@@ -182,44 +167,57 @@ describeIntegration('Valkey integration', () => {
 		await expect(readIndexInfo(client, config.indexName)).resolves.toBeNull();
 	});
 
-	// TODO: re-enable once @langchain/valkey writes "Is Any Of" as `@f:{a|b}`
-	// (TODO.md, L-14). The library currently builds `@f:({a}|{b})`, which
-	// valkey-search rejects ("Index does not have any text field" on 1.2.x,
-	// "Expected '[', '{', got '('" on older versions), so this test fails on
-	// every server until that fix is released and the vendored tarball updated.
-	it.skip('indexes declared fields and filters on them', async () => {
+	it('indexes declared fields and filters on NUMERIC ranges and TAG values', async () => {
 		const config = insertConfig('filters', { declaredFields: declared });
 		await insert(config, corpus);
 		const info = await readIndexInfo(client, config.indexName);
 		expect(metadataFields(info!, 'metadata')).toEqual(expect.arrayContaining(declared));
 
+		const contents = async (rows: FilterConditionRow[]) =>
+			(await search(config, 'refund', 10, rows)).map(([d]) => d.pageContent).sort();
+
+		expect(await contents([{ field: 'year', operator: 'gte', value: '2024' }])).toEqual([
+			'Refunds are processed within 5 days',
+			'Reset your password from settings',
+		]);
+		expect(await contents([{ field: 'year', operator: 'lte', value: '2022' }])).toEqual([
+			'Contact support by email',
+			'Special chars',
+		]);
+		expect(
+			await contents([{ field: 'year', operator: 'between', value: '2022', valueTo: '2023' }]),
+		).toEqual(['Annual plans are prorated', 'Contact support by email']);
+		expect(await contents([{ field: 'year', operator: 'equals', value: '2024' }])).toEqual([
+			'Reset your password from settings',
+		]);
+		expect(
+			await contents([
+				{ field: 'source', operator: 'is', value: 'billing.pdf' },
+				{ field: 'year', operator: 'between', value: '2023', valueTo: '2025' },
+			]),
+		).toEqual(['Annual plans are prorated', 'Refunds are processed within 5 days']);
+		expect(await contents([{ field: 'source', operator: 'is', value: 'a-b.c@d e' }])).toEqual([
+			'Special chars',
+		]);
+		expect(await contents([])).toHaveLength(corpus.length);
+	});
+
+	// TODO: re-enable once @langchain/valkey writes "Is Any Of" as `@f:{a|b}`.
+	// The library currently builds `@f:({a}|{b})`, which
+	// valkey-search rejects ("Index does not have any text field" on 1.2.x,
+	// "Expected '[', '{', got '('" on older versions), so this test fails on
+	// every server until that fix is released and the vendored tarball updated.
+	it.skip('filters on "Is Any Of" TAG values', async () => {
+		const config = insertConfig('filters-any-of', { declaredFields: declared });
+		await insert(config, corpus);
 		const anyOf = await search(config, 'refund', 10, [
-			{ field: 'source|TAG', operator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
+			{ field: 'source', operator: 'isAnyOf', value: 'billing.pdf, faq.pdf' },
 		]);
 		expect(anyOf.length).toBe(3);
 		anyOf.forEach(([d]) => expect(['billing.pdf', 'faq.pdf']).toContain(d.metadata.source));
-
-		const range = await search(config, 'refund', 10, [
-			{ field: 'year|NUMERIC', operator: 'gte', value: '2024' },
-		]);
-		expect(range.length).toBe(2);
-		range.forEach(([d]) => expect(d.metadata.year).toBeGreaterThanOrEqual(2024));
-
-		const combined = await search(config, 'refund', 10, [
-			{ field: 'source|TAG', operator: 'is', value: 'billing.pdf' },
-			{ field: 'year|NUMERIC', operator: 'between', value: '2023', valueTo: '2025' },
-		]);
-		expect(combined.length).toBe(2);
-
-		const special = await search(config, 'x', 10, [
-			{ field: 'source|TAG', operator: 'is', value: 'a-b.c@d e' },
-		]);
-		expect(special.map(([d]) => d.metadata.source)).toEqual(['a-b.c@d e']);
-
-		expect((await search(config, 'x', 10, [])).length).toBe(corpus.length);
 	});
 
-	it('isolates tenants: the configured filter applies regardless of the query', async () => {
+	it('isolates tenants: the configured filter limits results to one tenant', async () => {
 		const config = insertConfig('tenant', { declaredFields: declared });
 		await insert(config, corpus);
 		const results = await search(config, 'show all customer invoices', 10, [
@@ -242,9 +240,13 @@ describeIntegration('Valkey integration', () => {
 		const appending = { ...created, declaredFields: [] };
 		await insert(appending, [doc('2', 'second', 'acme'), doc('1', 'first, replaced', 'acme')]);
 
-		const key = `${created.keyPrefix}1`;
-		expect(String(await client.hget(key, 'metadata.tenant'))).toBe('acme');
-		expect(String(await client.hget(`${created.keyPrefix}2`, 'metadata.year'))).toBe('2024');
+		// Both documents written by the second Insert carry every indexed field of the index.
+		for (const id of ['1', '2']) {
+			const key = `${created.keyPrefix}${id}`;
+			expect(String(await client.hget(key, 'metadata.source'))).toBe('x.pdf');
+			expect(String(await client.hget(key, 'metadata.tenant'))).toBe('acme');
+			expect(String(await client.hget(key, 'metadata.year'))).toBe('2024');
+		}
 
 		const acme = await search(created, 'first', 10, [
 			{ field: 'tenant', operator: 'is', value: 'acme' },
@@ -310,7 +312,10 @@ describeIntegration('Valkey integration', () => {
 		const results = await search(config, 'no year', 10, [
 			{ field: 'year', operator: 'gte', value: '0' },
 		]);
-		expect(results.map(([d]) => d.pageContent)).not.toContain('no year');
+		// Every corpus document has a year, so all of them match; only "no year" is left out.
+		expect(results.map(([d]) => d.pageContent).sort()).toEqual(
+			corpus.map((d) => d.pageContent).sort(),
+		);
 	});
 
 	it('fails on a dimension mismatch on insert and on retrieve', async () => {
@@ -419,13 +424,40 @@ describeIntegration('Valkey integration', () => {
 		expect(await countKeys(client, config.keyPrefix)).toBe(1);
 	});
 
-	it('two concurrent first inserts both succeed', async () => {
+	it('two concurrent first inserts both succeed, one after retrying on "index already exists"', async () => {
 		const config = insertConfig('concurrent');
-		await Promise.all([insert(config, corpus.slice(0, 2)), insert(config, corpus.slice(2, 4))]);
+		// Hold each FT.CREATE until both inserts have reached it. Both have then
+		// seen no index, so exactly one FT.CREATE fails with "already exists".
+		const realCreate = GlideFt.create.bind(GlideFt);
+		let arrived = 0;
+		let releaseCreates!: () => void;
+		const bothArrived = new Promise<void>((resolve) => (releaseCreates = resolve));
+		const createOutcomes: string[] = [];
+		const create = jest
+			.spyOn(GlideFt, 'create')
+			.mockImplementation(async (...args: Parameters<typeof GlideFt.create>) => {
+				arrived += 1;
+				if (arrived === 2) releaseCreates();
+				await bothArrived;
+				const reply = realCreate(...args);
+				reply.then(
+					() => createOutcomes.push('created'),
+					(error: Error) => createOutcomes.push(error.message),
+				);
+				return await reply;
+			});
+		try {
+			await Promise.all([insert(config, corpus.slice(0, 2)), insert(config, corpus.slice(2, 4))]);
+		} finally {
+			create.mockRestore();
+		}
+		expect(createOutcomes).toHaveLength(2);
+		expect(createOutcomes).toContain('created');
+		expect(createOutcomes.some((outcome) => /already exists/i.test(outcome))).toBe(true);
 		expect(await countKeys(client, config.keyPrefix)).toBe(4);
 	});
 
-	it('TTL expires inserted keys', async () => {
+	it('sets the TTL on inserted keys', async () => {
 		const config = insertConfig('ttl', { ttl: 3600 });
 		await insert(config, corpus.slice(0, 1));
 		const [, keys] = await client.scan('0', { match: `${config.keyPrefix}*`, count: 1000 });
@@ -474,17 +506,7 @@ describeIntegration('Valkey integration', () => {
 			expect(await storedMetadata(`${config.keyPrefix}faq-1`)).toEqual({ doc_key: 'faq-1' });
 		});
 
-		it('search results return the stored metadata only, without a random ID', async () => {
-			const config = insertConfig('ids-random');
-			await insert(config, [
-				new Document({ pageContent: 'No ID given', metadata: { topic: 'billing' } }),
-			]);
-
-			const [[found]] = await search(config, 'No ID given', 1);
-			expect(found.metadata).toEqual({ topic: 'billing' });
-		});
-
-		it('search results carry the ID in the ID Metadata Field', async () => {
+		it('search results keep the stored ID Metadata Field', async () => {
 			const config = insertConfig('ids-search', { idField: 'doc_key' });
 			await insert(config, [faq('faq-1', 'Refunds take 5 days')]);
 			const [[found]] = await search(config, 'Refunds take 5 days', 1);
@@ -537,6 +559,13 @@ describeIntegration('Valkey integration', () => {
 			const config = insertConfig('update-meta', { idField: 'doc_key', declaredFields: declared });
 			await insert(config, [faq('faq-1', 'Old answer', { tenant: 'acme', year: 2020 })]);
 			const key = `${config.keyPrefix}faq-1`;
+			const byYear = async () =>
+				(
+					await search(config, 'New answer', 10, [{ field: 'year', operator: 'gte', value: '0' }])
+				).map(([d]) => d.metadata.doc_key);
+			// The year filter matches the document before the update, so an empty result later
+			// shows that the update removed the field.
+			expect(await byYear()).toEqual(['faq-1']);
 
 			// The document exactly as n8n's Update builds it from the node's settings.
 			const settings: Record<string, unknown> = {
@@ -563,15 +592,13 @@ describeIntegration('Valkey integration', () => {
 				{ field: 'tenant', operator: 'is', value: 'globex' },
 			]);
 			expect(byNew.map(([d]) => d.metadata.doc_key)).toEqual(['faq-1']);
-			const byOld = await search(config, 'New answer', 10, [
-				{ field: 'year', operator: 'gte', value: '0' },
-			]);
-			expect(byOld).toHaveLength(0);
+			expect(await byYear()).toEqual([]);
 		});
 
-		it('Update fails when the ID field differs from the Update ID, and changes nothing', async () => {
+		it('Update rejects a document whose ID Metadata Field names a different document, and leaves the stored document unchanged', async () => {
 			const config = insertConfig('update-mismatch', { idField: 'doc_key' });
 			await insert(config, [faq('faq-1', 'Original')]);
+			// Update targets faq-1, but the incoming document carries doc_key "faq-2".
 			await expect(update(config, faq('faq-2', 'Changed'), 'faq-1')).rejects.toThrow(
 				'does not match metadata field "doc_key"',
 			);

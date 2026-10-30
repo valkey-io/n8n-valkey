@@ -151,10 +151,10 @@ describe('clearIndex', () => {
 	it('does not delete under later prefixes after a failure', async () => {
 		const { client, store } = fakeKeyspace(['a:1', 'b:1']);
 		client.unlink.mockRejectedValueOnce(new Error('NOPERM'));
-		await expect(clearIndex(client, 'kb', ['a:', 'b:'], async () => 'OK')).rejects.toThrow(
-			'NOPERM',
-		);
+		const drop = jest.fn(async () => 'OK');
+		await expect(clearIndex(client, 'kb', ['a:', 'b:'], drop)).rejects.toThrow('NOPERM');
 		expect(store.has('b:1')).toBe(true);
+		expect(drop).not.toHaveBeenCalled();
 	});
 
 	it('reports that the documents are gone when dropping the index fails', async () => {
@@ -186,14 +186,17 @@ describe('clearIndex', () => {
 	});
 
 	it('refuses an empty prefix before deleting or dropping anything', async () => {
-		const { client, store } = fakeKeyspace(['a']);
+		// doc:kb:1 sits under the valid prefix, so deleting it before checking '' would show.
+		const { client, store } = fakeKeyspace(['doc:kb:1', 'a']);
 		const drop = jest.fn(async () => 'OK');
 		await expect(clearIndex(client, 'kb', [''], drop)).rejects.toThrow('non-empty key prefix');
 		await expect(clearIndex(client, 'kb', ['doc:kb:', ''], drop)).rejects.toThrow(
 			'non-empty key prefix',
 		);
 		await expect(clearIndex(client, 'kb', [], drop)).rejects.toThrow('non-empty key prefix');
+		expect(client.scan).not.toHaveBeenCalled();
+		expect(client.unlink).not.toHaveBeenCalled();
 		expect(drop).not.toHaveBeenCalled();
-		expect(store.size).toBe(1);
+		expect([...store].sort()).toEqual(['a', 'doc:kb:1']);
 	});
 });

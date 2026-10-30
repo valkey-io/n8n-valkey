@@ -98,7 +98,7 @@ describe('buildMetadataFilter', () => {
 		});
 	});
 
-	it('rejects a field that is not indexed, including from an expression', () => {
+	it('rejects a field that is not indexed', () => {
 		expect(() => build([{ field: 'category', operator: 'is', value: 'x' }])).toThrow(
 			'"category" is not an indexed field of index "kb"',
 		);

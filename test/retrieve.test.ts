@@ -4,7 +4,7 @@ import { normalizeIndexInfo } from '../nodes/ValkeyVectorStore/shared/indexSchem
 import { N8nValkeyVectorStore } from '../nodes/ValkeyVectorStore/shared/filteredStore';
 import { buildRetrieveStore } from '../nodes/ValkeyVectorStore/shared/retrieve';
 import type { StoreConfig } from '../nodes/ValkeyVectorStore/shared/config';
-import { HASH_INDEX, JSON_INDEX } from './indexSchema.test';
+import { HASH_INDEX, JSON_INDEX } from './fixtures/ftInfo';
 
 const config: StoreConfig = {
 	indexName: 'kb',
@@ -88,7 +88,7 @@ describe('N8nValkeyVectorStore', () => {
 
 	it('always applies the configured filter and ignores the caller filter', async () => {
 		const { store, search } = await storeWithFilter([
-			{ field: 'source|TAG', operator: 'is', value: 'acme.pdf' },
+			{ field: 'source', operator: 'is', value: 'acme.pdf' },
 		]);
 		const query = new Array(1536).fill(0);
 		// Retrievers and the tool wrapper pass their own filter argument.
@@ -206,7 +206,7 @@ describe('N8nValkeyVectorStore', () => {
 		}
 		const doc = (metadata: Record<string, unknown>) => ({ pageContent: 'x', metadata });
 
-		it('writes under the given ID without checking that it exists (upsert)', async () => {
+		it('passes the Update ID to the library without checking that the document exists', async () => {
 			const { store, write, c } = await updateStore();
 			await expect(store.addDocuments([doc({})], { ids: ['faq-9'] })).resolves.toEqual(['faq-1']);
 			expect(c.exists).not.toHaveBeenCalled();
@@ -237,8 +237,19 @@ describe('N8nValkeyVectorStore', () => {
 			expect(write).toHaveBeenCalled();
 		});
 
-		it('fails when the ID Metadata Field differs from the Update ID', async () => {
-			const { store, write } = await updateStore('doc_key');
+		it('fails when the ID Metadata Field differs from the Update ID, before embedding', async () => {
+			const store = await buildRetrieveStore(
+				client() as never,
+				{ ...config, updateMode: true, idField: 'doc_key' },
+				embeddings,
+				[],
+				async () => normalizeIndexInfo(HASH_INDEX),
+			);
+			// The library's addDocuments runs for real and would embed; only its write is mocked.
+			const write = jest
+				.spyOn(Object.getPrototypeOf(N8nValkeyVectorStore.prototype), 'addVectors')
+				.mockResolvedValue(['faq-1']);
+			embeddings.embedDocuments.mockClear();
 			await expect(
 				store.addDocuments([doc({ doc_key: 'faq-2' })], { ids: ['faq-1'] }),
 			).rejects.toThrow('Update ID "faq-1" does not match metadata field "doc_key" ("faq-2")');

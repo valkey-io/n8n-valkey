@@ -9,7 +9,7 @@ import type { HostLangChain } from '../nodes/ValkeyVectorStore/shared/hostVector
 import { normalizeIndexInfo } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import { buildRetrieveStore } from '../nodes/ValkeyVectorStore/shared/retrieve';
 import type { StoreConfig } from '../nodes/ValkeyVectorStore/shared/config';
-import { HASH_INDEX } from './indexSchema.test';
+import { HASH_INDEX } from './fixtures/ftInfo';
 
 const config: StoreConfig = {
 	indexName: 'kb',
@@ -75,25 +75,38 @@ describe('toHostVectorStore', () => {
 				]);
 
 			const bridged = toHostVectorStore(store, embeddings, host);
-			const docs = await bridged.asRetriever(3).invoke('question');
+			const docs = await bridged
+				.asRetriever(3, '@metadata.tenant:{other}' as never)
+				.invoke('question');
 
 			expect(embeddings.embedQuery).toHaveBeenCalledWith('question');
 			// The caller's filter is never passed on; the store applies its own.
 			expect(search).toHaveBeenCalledWith([0.1, 0.2], 3);
+			expect(search.mock.calls[0]).toHaveLength(2);
 			expect(docs).toHaveLength(1);
 			expect(docs[0]).toBeInstanceOf(host.Document);
 			expect(docs[0]).toMatchObject({ pageContent: 'hi', metadata: { a: 1 }, id: 'x' });
 		});
 
-		it('forwards writes, so Update checks still run', async () => {
+		it('forwards addDocuments, addVectors and delete to the store', async () => {
 			const host = secondCopy();
 			const { store, embeddings } = await makeStore();
-			const add = jest.spyOn(store, 'addDocuments').mockResolvedValue(['faq-1']);
+			const addDocuments = jest.spyOn(store, 'addDocuments').mockResolvedValue(['faq-1']);
+			const addVectors = jest.spyOn(store, 'addVectors').mockResolvedValue(['faq-1']);
+			const remove = jest.spyOn(store, 'delete').mockResolvedValue(undefined);
 			const bridged = toHostVectorStore(store, embeddings, host);
 
 			const doc = new Document({ pageContent: 'x', metadata: {} });
 			await expect(bridged.addDocuments([doc], { ids: ['faq-1'] })).resolves.toEqual(['faq-1']);
-			expect(add).toHaveBeenCalledWith([doc], { ids: ['faq-1'] });
+			expect(addDocuments).toHaveBeenCalledWith([doc], { ids: ['faq-1'] });
+
+			await expect(bridged.addVectors([[0.1, 0.2]], [doc], { ids: ['faq-1'] })).resolves.toEqual([
+				'faq-1',
+			]);
+			expect(addVectors).toHaveBeenCalledWith([[0.1, 0.2]], [doc], { ids: ['faq-1'] });
+
+			await bridged.delete({ ids: ['faq-1'] });
+			expect(remove).toHaveBeenCalledWith({ ids: ['faq-1'] });
 		});
 
 		it('closes the store client', async () => {
