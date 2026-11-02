@@ -152,7 +152,15 @@ export function buildMetadataFilter(
 				);
 			}
 			const values = parseTagValues(label, row.value, operator === 'isAnyOf');
-			filter[name] = operator === 'is' && values.length === 1 ? values[0] : values;
+			// An array from an expression must not widen "is" into an OR, which could
+			// let a tenant filter match several tenants.
+			if (operator === 'is' && values.length > 1) {
+				throw new ValkeyUserError(
+					`${label}: "Is" takes one value, got ${values.length}. Use "Is Any Of" for several values.`,
+					'invalid-filter',
+				);
+			}
+			filter[name] = operator === 'is' ? values[0] : values;
 			return;
 		}
 

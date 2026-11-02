@@ -98,6 +98,20 @@ describe('buildMetadataFilter', () => {
 		});
 	});
 
+	it('rejects several values for "is" instead of matching any of them', () => {
+		const run = () => build([{ field: 'tenant', operator: 'is', value: ['acme', 'globex'] }]);
+		expect(run).toThrow(expect.objectContaining({ code: 'invalid-filter' }));
+		expect(run).toThrow(
+			'Metadata Filter condition 1 ("tenant"): "Is" takes one value, got 2. Use "Is Any Of" for several values.',
+		);
+	});
+
+	it('accepts a one-value array for "is"', () => {
+		expect(build([{ field: 'tenant', operator: 'is', value: ['acme'] }])).toEqual({
+			tenant: 'acme',
+		});
+	});
+
 	it('rejects a field that is not indexed', () => {
 		expect(() => build([{ field: 'category', operator: 'is', value: 'x' }])).toThrow(
 			'"category" is not an indexed field of index "kb"',
