@@ -306,6 +306,20 @@ describe('parseCredentials', () => {
 		expect(() => parseCredentials({ host: '  ' })).toThrow('no host');
 	});
 
+	it('rejects a username without a password instead of connecting as the default user', () => {
+		const read = () => parseCredentials({ host: 'h', username: 'alice', password: '' });
+		expect(read).toThrow(expect.objectContaining({ code: 'invalid-credential' }));
+		expect(read).toThrow(
+			"The Valkey credential's Username needs a Password. Set a password, or clear the username to use the default user.",
+		);
+	});
+
+	it('accepts a password without a username, for the default user', () => {
+		const result = parseCredentials({ host: 'h', password: 'secret' });
+		expect(result.username).toBeUndefined();
+		expect(result.password).toBe('secret');
+	});
+
 	it('uses the defaults for a blank port or database number', () => {
 		const result = parseCredentials({ host: 'h', port: '', database: '  ' });
 		expect(result.port).toBe(6379);

@@ -107,6 +107,16 @@ export function parseCredentials(data: ICredentialDataDecryptedObject): ValkeyCr
 	const host = String(data.host ?? '').trim();
 	if (!host)
 		throw new ValkeyUserError('The Valkey credential has no host set.', 'invalid-credential');
+	const username = data.username ? String(data.username) : undefined;
+	const password = data.password ? String(data.password) : undefined;
+	// Glide sends a username only together with a password, so a username on its
+	// own would silently connect as the default user.
+	if (username && !password) {
+		throw new ValkeyUserError(
+			"The Valkey credential's Username needs a Password. Set a password, or clear the username to use the default user.",
+			'invalid-credential',
+		);
+	}
 	return {
 		host,
 		port: wholeNumber("The Valkey credential's Port", data.port, {
