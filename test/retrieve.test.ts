@@ -1,4 +1,5 @@
 import { Document } from '@langchain/core/documents';
+import { GlideFt } from '@valkey/valkey-glide';
 
 import { normalizeIndexInfo } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import { N8nValkeyVectorStore } from '../nodes/ValkeyVectorStore/shared/filteredStore';
@@ -179,11 +180,54 @@ describe('N8nValkeyVectorStore', () => {
 
 		it('writes a valid document through the library', async () => {
 			const { store } = await storeWithFilter([]);
+			jest.spyOn(store, 'checkIndexExists').mockResolvedValue(true);
 			const write = libraryWrite();
 			const vectors = [new Array(1536).fill(0)];
 			const docs = [doc({ source: 'a.pdf', year: 2024 })];
 			await expect(store.addVectors(vectors, docs, { ids: ['doc1'] })).resolves.toEqual(['doc1']);
 			expect(write).toHaveBeenCalledWith(vectors, docs, { ids: ['doc1'] });
+		});
+
+		describe('when the index is gone at write time', () => {
+			/** An Update store over a client that records every batch it is sent. */
+			async function updateStore() {
+				const c = { close: jest.fn(), exec: jest.fn(async () => []) };
+				const store = await buildRetrieveStore(
+					c as never,
+					{ ...config, updateMode: true },
+					embeddings,
+					[],
+					async () => normalizeIndexInfo(HASH_INDEX),
+				);
+				return { store, exec: c.exec };
+			}
+			const vectors = [new Array(1536).fill(0.1)];
+
+			it('fails with "does not exist" instead of recreating the index, and writes nothing', async () => {
+				const { store, exec } = await updateStore();
+				// Another execution ran Delete Index and Documents after the store was built.
+				jest.spyOn(store, 'checkIndexExists').mockResolvedValue(false);
+				const ftCreate = jest.spyOn(GlideFt, 'create');
+
+				const write = store.addVectors(vectors, [doc({})], { ids: ['faq-1'] });
+
+				await expect(write).rejects.toThrow(expect.objectContaining({ code: 'index-not-found' }));
+				await expect(write).rejects.toThrow('Index "kb" does not exist');
+				expect(ftCreate).not.toHaveBeenCalled();
+				expect(exec).not.toHaveBeenCalled();
+			});
+
+			it('writes when the index still exists', async () => {
+				const { store, exec } = await updateStore();
+				jest.spyOn(store, 'checkIndexExists').mockResolvedValue(true);
+				const ftCreate = jest.spyOn(GlideFt, 'create');
+
+				await expect(store.addVectors(vectors, [doc({})], { ids: ['faq-1'] })).resolves.toEqual([
+					'faq-1',
+				]);
+				expect(ftCreate).not.toHaveBeenCalled();
+				expect(exec).toHaveBeenCalledTimes(1);
+			});
 		});
 	});
 

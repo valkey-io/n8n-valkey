@@ -3,19 +3,12 @@ import type { GlideClient } from '@valkey/valkey-glide';
 
 import type { StoreConfig } from './config';
 import { toCompatibilityConfig, toLibraryConfig } from './config';
-import { ValkeyUserError } from './errors';
+import { missingIndexError } from './errors';
 import { buildMetadataFilter, toCustomSchema } from './filters';
 import type { FilterConditionRow } from './filters';
 import { assertCompatible, metadataFields, readIndexInfo } from './indexSchema';
 import type { IndexInfo } from './indexSchema';
 import { N8nValkeyVectorStore } from './filteredStore';
-
-export function missingIndexError(indexName: string): ValkeyUserError {
-	return new ValkeyUserError(
-		`Index "${indexName}" does not exist. Check the index name, or insert documents first.`,
-		'index-not-found',
-	);
-}
 
 /**
  * Builds the store for Get Many, Retrieve as Vector Store and Retrieve as

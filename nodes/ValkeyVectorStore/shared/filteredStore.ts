@@ -4,7 +4,7 @@ import { ValkeyVectorStore } from '@langchain/valkey';
 import type { ValkeyAddOptions, ValkeyVectorStoreConfig } from '@langchain/valkey';
 import type { GlideClient } from '@valkey/valkey-glide';
 
-import { ValkeyUserError } from './errors';
+import { ValkeyUserError, missingIndexError } from './errors';
 import type { MetadataFilter } from './filters';
 import { assertDimension } from './indexSchema';
 import type { MetadataField } from './indexSchema';
@@ -89,6 +89,11 @@ export class N8nValkeyVectorStore extends ValkeyVectorStore {
 	 * Same checks as Insert before anything is written. Without the dimension
 	 * check, a vector of the wrong size would be stored but never indexed, so
 	 * the document would silently drop out of search.
+	 *
+	 * The index is checked again here because it may have been dropped after
+	 * this store was built, for example by another execution's Delete Index and
+	 * Documents. Update fails then, rather than letting the library recreate the
+	 * index with settings that need not match the dropped one.
 	 */
 	async addVectors(
 		vectors: number[][],
@@ -99,6 +104,7 @@ export class N8nValkeyVectorStore extends ValkeyVectorStore {
 		for (const vector of vectors) {
 			assertDimension(this.indexName, this.options.indexDimension, vector.length);
 		}
+		if (!(await this.checkIndexExists())) throw missingIndexError(this.indexName);
 		return await super.addVectors(vectors, documents, options);
 	}
 

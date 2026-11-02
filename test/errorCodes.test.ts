@@ -2,7 +2,11 @@ import { Document } from '@langchain/core/documents';
 
 import { parseCredentials } from '../nodes/ValkeyVectorStore/shared/config';
 import { clearIndex } from '../nodes/ValkeyVectorStore/shared/clearIndex';
-import { ValkeyUserError, classifyFtError } from '../nodes/ValkeyVectorStore/shared/errors';
+import {
+	ValkeyUserError,
+	classifyFtError,
+	missingIndexError,
+} from '../nodes/ValkeyVectorStore/shared/errors';
 import { buildMetadataFilter } from '../nodes/ValkeyVectorStore/shared/filters';
 import {
 	assertCompatible,
@@ -10,7 +14,6 @@ import {
 	normalizeIndexInfo,
 } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import { validateDocumentMetadata } from '../nodes/ValkeyVectorStore/shared/insert';
-import { missingIndexError } from '../nodes/ValkeyVectorStore/shared/retrieve';
 import { HASH_INDEX } from './fixtures/ftInfo';
 
 /** Runs fn and returns the ValkeyUserError it throws. */

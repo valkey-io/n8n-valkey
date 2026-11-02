@@ -38,6 +38,13 @@ export const CLUSTER_MODE_ERROR =
 export const NO_DOCUMENTS_ERROR =
 	'No documents to insert: the connected Document Loader produced no documents.';
 
+export function missingIndexError(indexName: string): ValkeyUserError {
+	return new ValkeyUserError(
+		`Index "${indexName}" does not exist. Check the index name, or insert documents first.`,
+		'index-not-found',
+	);
+}
+
 export type FtErrorKind = 'index-missing' | 'search-module-missing' | 'index-exists' | 'other';
 
 function messageOf(error: unknown): string {
