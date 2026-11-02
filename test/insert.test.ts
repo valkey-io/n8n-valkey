@@ -300,6 +300,28 @@ describe('insertBatch', () => {
 		);
 	});
 
+	it('says the index was cleared and how many documents were written when a later batch fails to embed', async () => {
+		const { deps } = fakeDeps({ info: normalizeIndexInfo(HASH_INDEX) });
+		const embedder = embeddings();
+		const state = newInsertState();
+		await insertBatch({ ...baseConfig, clearIndex: true }, embedder, docs(200), state, deps);
+
+		embedder.embedDocuments.mockRejectedValueOnce(new Error('429 rate limit'));
+		const failure = insertBatch(
+			{ ...baseConfig, clearIndex: true },
+			embedder,
+			docs(200),
+			state,
+			deps,
+		);
+		// Nothing of this batch was written, so the message does not say part of it may have been.
+		await expect(failure).rejects.toHaveProperty(
+			'message',
+			'429 rate limit The index was cleared before this insert (deleted documents under "doc:kb:"), so its previous documents are gone. 200 document(s) were written in earlier batches.',
+		);
+		await expect(failure).rejects.toMatchObject({ code: 'partial-write' });
+	});
+
 	it('retries once when another execution created the index first', async () => {
 		let calls = 0;
 		const { deps } = fakeDeps({
@@ -544,7 +566,7 @@ describe('insertBatch with ID Metadata Field', () => {
 		await insertBatch(config, embeddings(), withIds('faq-1', 'faq-2'), state, deps);
 		const failure = insertBatch(config, embeddings(), withIds('faq-3', 'faq-2'), state, deps);
 		await expect(failure).rejects.toThrow(
-			/ID "faq-2" appears in more than one document.*2 document\(s\) from earlier batches were already written/,
+			/ID "faq-2" appears in more than one document.*2 document\(s\) were written in earlier batches/,
 		);
 		await expect(failure).rejects.toMatchObject({ code: 'partial-write' });
 		expect(calls).toEqual([['faq-1', 'faq-2']]);

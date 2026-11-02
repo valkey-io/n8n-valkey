@@ -169,10 +169,11 @@ function partialWriteContext(state: InsertState, writing: boolean): string {
 			`The index was cleared before this insert${where}, so its previous documents are gone.`,
 		);
 	}
+	if (state.written > 0) {
+		parts.push(`${state.written} document(s) were written in earlier batches.`);
+	}
 	if (writing) {
-		parts.push(
-			`${state.written} document(s) were written in earlier batches; part of the failing batch may also have been written.`,
-		);
+		parts.push('Part of the failing batch may also have been written.');
 	}
 	return parts.join(' ');
 }
@@ -191,50 +192,42 @@ export async function insertBatch(
 	if (documents.length === 0) return;
 
 	validateMetadataKey(config.metadataKey);
-	validateDocumentMetadata(documents, config.declaredFields);
 
-	let ids: string[] | undefined;
-	try {
-		ids = config.idField ? batchIds(documents, config, state) : undefined;
-	} catch (error) {
-		// Earlier batches of this execution may already be written.
-		const context = partialWriteContext(state, false);
-		const earlier = state.written
-			? `${state.written} document(s) from earlier batches were already written.`
-			: '';
-		const note = [context, earlier].filter(Boolean).join(' ');
-		if (!note) throw error;
-		const wrapped = new ValkeyUserError(`${messageOf(error)} ${note}`, 'partial-write');
-		wrapped.cause = error;
-		throw wrapped;
-	}
-
-	// Embed first: the most likely failure (the embeddings API) then happens
-	// before Delete Index and Documents has deleted anything.
-	const vectors = await embeddings.embedDocuments(documents.map((d) => d.pageContent));
-	if (vectors.length !== documents.length || !vectors[0]?.length) {
-		throw new ValkeyUserError(
-			`The embeddings model returned ${vectors.length} vector(s) for ${documents.length} document(s).`,
-			'embeddings-response',
-		);
-	}
-	const dimension = vectors[0].length;
-	// Check every vector, not only the first: a later empty, wrong-length or
-	// NaN vector would otherwise pass here and only fail in the library's
-	// write, after Delete Index and Documents has already deleted the index.
-	const invalidVectorIndex = vectors.findIndex(
-		(v) => v.length !== dimension || !v.every(Number.isFinite),
-	);
-	if (invalidVectorIndex !== -1) {
-		throw new ValkeyUserError(
-			`The embeddings model returned a vector of length ${vectors[invalidVectorIndex].length} for document ${invalidVectorIndex + 1}; expected ${dimension} finite numbers.`,
-			'embeddings-response',
-		);
-	}
-
+	// Everything below runs inside one try, so a failure on a later batch (an ID
+	// error, an embeddings rate limit, a connection error) says what earlier
+	// batches of this execution already did.
 	let writing = false;
-	const client = await deps.openClient();
+	// Set once connected, so the finally block closes only a client that was opened.
+	let openedClient: GlideClient | undefined;
 	try {
+		validateDocumentMetadata(documents, config.declaredFields);
+		const ids = config.idField ? batchIds(documents, config, state) : undefined;
+
+		// Embed first: the most likely failure (the embeddings API) then happens
+		// before Delete Index and Documents has deleted anything.
+		const vectors = await embeddings.embedDocuments(documents.map((d) => d.pageContent));
+		if (vectors.length !== documents.length || !vectors[0]?.length) {
+			throw new ValkeyUserError(
+				`The embeddings model returned ${vectors.length} vector(s) for ${documents.length} document(s).`,
+				'embeddings-response',
+			);
+		}
+		const dimension = vectors[0].length;
+		// Check every vector, not only the first: a later empty, wrong-length or
+		// NaN vector would otherwise pass here and only fail in the library's
+		// write, after Delete Index and Documents has already deleted the index.
+		const invalidVectorIndex = vectors.findIndex(
+			(v) => v.length !== dimension || !v.every(Number.isFinite),
+		);
+		if (invalidVectorIndex !== -1) {
+			throw new ValkeyUserError(
+				`The embeddings model returned a vector of length ${vectors[invalidVectorIndex].length} for document ${invalidVectorIndex + 1}; expected ${dimension} finite numbers.`,
+				'embeddings-response',
+			);
+		}
+
+		const client = await deps.openClient();
+		openedClient = client;
 		if (config.clearIndex && !state.cleared) {
 			// Read the index before dropping it: its own prefixes say which keys
 			// are its documents, whatever Key Prefix is configured now.
@@ -283,6 +276,6 @@ export async function insertBatch(
 		wrapped.cause = error;
 		throw wrapped;
 	} finally {
-		client.close();
+		openedClient?.close();
 	}
 }
