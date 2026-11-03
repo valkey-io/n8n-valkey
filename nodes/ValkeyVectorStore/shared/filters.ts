@@ -144,7 +144,7 @@ export function buildMetadataFilter(
 ): MetadataFilter | undefined {
 	if (rows.length === 0) return undefined;
 
-	const types = new Map<string, MetadataFieldType>(indexFields.map((f) => [f.name, f.type]));
+	const byName = new Map<string, MetadataField>(indexFields.map((f) => [f.name, f]));
 	const filter: MetadataFilter = {};
 
 	rows.forEach((row, index) => {
@@ -153,7 +153,7 @@ export function buildMetadataFilter(
 
 		if (!name) throw new ValkeyUserError(`${label}: no field selected.`, 'invalid-filter');
 
-		const type = types.get(name);
+		const type = byName.get(name)?.type;
 		if (!type) {
 			throw new ValkeyUserError(
 				`${label}: "${name}" is not an indexed field of index "${indexName}". Filterable fields: ${
@@ -177,6 +177,20 @@ export function buildMetadataFilter(
 			if (operator === 'is' && values.length > 1) {
 				throw new ValkeyUserError(
 					`${label}: "Is" takes one value, got ${values.length}. Use "Is Any Of" for several values.`,
+					'invalid-filter',
+				);
+			}
+			// Valkey splits a stored TAG value on the field's separator, so a value
+			// that contains it is indexed as several tags and can never match.
+			const separator = byName.get(name)?.separator ?? ',';
+			const joined = values.find((v) => v.includes(separator));
+			if (joined !== undefined) {
+				const hint =
+					operator === 'is'
+						? 'Use "Is Any Of" with the parts.'
+						: 'Give the parts as separate values.';
+				throw new ValkeyUserError(
+					`${label}: the value "${joined}" contains "${separator}", which separates tags in this field, so it can never match. ${hint}`,
 					'invalid-filter',
 				);
 			}

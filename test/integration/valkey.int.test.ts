@@ -212,6 +212,29 @@ describeIntegration('Valkey integration', () => {
 		anyOf.forEach(([d]) => expect(['billing.pdf', 'faq.pdf']).toContain(d.metadata.source));
 	});
 
+	it('rejects an "Is" value that contains the TAG separator, for a value another tool stored', async () => {
+		const config = insertConfig('separator-value', {
+			declaredFields: [{ name: 'source', type: 'TAG' }],
+			idField: 'doc_id',
+		});
+		await insert(config, [
+			new Document({ pageContent: 'doc', metadata: { doc_id: '1', source: 'a' } }),
+		]);
+		// The node refuses "a,b" on insert, so write it the way another tool would.
+		// Valkey indexes it as the two tags "a" and "b".
+		await client.hset(`${config.keyPrefix}1`, { metadata_source: 'a,b' });
+
+		expect(
+			await search(config, 'doc', 5, [{ field: 'source', operator: 'is', value: 'b' }]),
+		).toHaveLength(1);
+		expect(
+			await search(config, 'doc', 5, [{ field: 'source', operator: 'isAnyOf', value: 'a, b' }]),
+		).toHaveLength(1);
+		await expect(
+			search(config, 'doc', 5, [{ field: 'source', operator: 'is', value: 'a,b' }]),
+		).rejects.toThrow('contains ",", which separates tags in this field');
+	});
+
 	it('isolates tenants: the configured filter limits results to one tenant', async () => {
 		const config = insertConfig('tenant', { declaredFields: declared });
 		await insert(config, corpus);

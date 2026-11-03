@@ -192,6 +192,44 @@ describe('buildMetadataFilter', () => {
 		);
 	});
 
+	describe('a TAG value that contains the field separator', () => {
+		const pipeFields: MetadataField[] = [{ name: 'tags', type: 'TAG', separator: '|' }];
+		const buildPipe = (rows: object[]) => buildMetadataFilter(rows, pipeFields, 'kb');
+
+		it('rejects "Is" with a comma on a field with the default separator', () => {
+			expect(() => build([{ field: 'source', operator: 'is', value: 'a,b' }])).toThrow(
+				'Metadata Filter condition 1 ("source"): the value "a,b" contains ",", which separates tags in this field, so it can never match. Use "Is Any Of" with the parts.',
+			);
+		});
+
+		it('rejects an "Is Any Of" list element that contains the separator', () => {
+			expect(() => build([{ field: 'source', operator: 'isAnyOf', value: ['x', 'a,b'] }])).toThrow(
+				'the value "a,b" contains ","',
+			);
+			expect(() => build([{ field: 'source', operator: 'isAnyOf', value: ['x', 'a,b'] }])).toThrow(
+				'Give the parts as separate values.',
+			);
+		});
+
+		it('rejects "Is" with the separator of a field that sets its own', () => {
+			expect(() => buildPipe([{ field: 'tags', operator: 'is', value: 'a|b' }])).toThrow(
+				'the value "a|b" contains "|"',
+			);
+		});
+
+		it('accepts a comma in a field whose separator is not a comma', () => {
+			expect(buildPipe([{ field: 'tags', operator: 'is', value: 'a,b' }])).toEqual({
+				tags: 'a,b',
+			});
+		});
+
+		it('rejects a typed "Is Any Of" value whose parts contain the field separator', () => {
+			expect(() => buildPipe([{ field: 'tags', operator: 'isAnyOf', value: 'a|b, c' }])).toThrow(
+				'the value "a|b" contains "|"',
+			);
+		});
+	});
+
 	it('rejects two TAG conditions on one field', () => {
 		expect(() =>
 			build([
