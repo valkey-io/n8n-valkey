@@ -1,4 +1,4 @@
-import type { Document } from '@langchain/core/documents';
+import { Document } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import { ValkeyVectorStore as LangchainValkeyVectorStore } from '@langchain/valkey';
 import type { GlideClient } from '@valkey/valkey-glide';
@@ -7,7 +7,7 @@ import { clearIndex } from './clearIndex';
 import type { InsertConfig } from './config';
 import { toCompatibilityConfig, toLibraryConfig, validateMetadataKey } from './config';
 import { ValkeyUserError, classifyFtError, messageOf } from './errors';
-import { toCustomSchema } from './filters';
+import { hasOwn, toCustomSchema } from './filters';
 import { assertCompatible, metadataFields, readIndexInfo } from './indexSchema';
 import type { IndexInfo, MetadataField } from './indexSchema';
 
@@ -56,9 +56,23 @@ export const defaultInsertDeps = (openClient: () => Promise<GlideClient>): Inser
 			ttl: config.ttl,
 			customSchema: fields.length ? toCustomSchema(fields) : undefined,
 		});
-		await store.addVectors(vectors, documents, ids ? { ids } : undefined);
+		await store.addVectors(vectors, withOwnMetadata(documents), ids ? { ids } : undefined);
 	},
 });
+
+/**
+ * Copies each document's metadata into an object with no prototype, so the
+ * library's `metadata[fieldName]` lookups see only the document's own keys.
+ * Without it, a schema field named like an Object.prototype member
+ * (`constructor`, `toString`) reads the inherited member on documents that do
+ * not have the field, and the library rejects them.
+ */
+export function withOwnMetadata(documents: Document[]): Document[] {
+	return documents.map((doc) => {
+		const metadata = Object.assign(Object.create(null) as Record<string, unknown>, doc.metadata);
+		return new Document({ pageContent: doc.pageContent, metadata, id: doc.id });
+	});
+}
 
 /** An ID without the key prefix, the form the library returns and the node compares. */
 export function stripKeyPrefix(id: string, keyPrefix: string): string {
@@ -127,7 +141,8 @@ export function validateDocumentMetadata(documents: Document[], declared: Metada
 	documents.forEach((doc, index) => {
 		const metadata = (doc.metadata ?? {}) as Record<string, unknown>;
 		for (const field of declared) {
-			const value = metadata[field.name];
+			// Only the document's own keys: an inherited `constructor` is not a value.
+			const value = hasOwn(metadata, field.name) ? metadata[field.name] : undefined;
 			if (value === undefined || value === null) continue;
 			if (field.type === 'NUMERIC' && (typeof value !== 'number' || !Number.isFinite(value))) {
 				throw new ValkeyUserError(

@@ -417,6 +417,51 @@ describeIntegration('Valkey integration', () => {
 			]);
 			expect(results.map(([doc]) => doc.pageContent)).toEqual(['acme doc']);
 		});
+
+		it('inserts into and filters on fields named like Object.prototype members', async () => {
+			const config = insertConfig('prototype-names');
+			await createIndex(config, [
+				...vectorSchema('content_vector'),
+				'metadata_constructor',
+				'TAG',
+				'metadata_toString',
+				'NUMERIC',
+				'metadata___proto__',
+				'TAG',
+				'metadata_tenant',
+				'TAG',
+			]);
+
+			// A document without those fields used to fail validation on every insert.
+			await insert(config, [
+				new Document({ pageContent: 'plain doc', metadata: { tenant: 'acme' } }),
+			]);
+			const tagged = new Document({ pageContent: 'tagged doc', metadata: { tenant: 'acme' } });
+			Object.assign(tagged.metadata, { constructor: 'red', toString: 7 });
+			Object.defineProperty(tagged.metadata, '__proto__', {
+				value: 'blue',
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
+			await insert(config, [tagged]);
+
+			const contents = async (rows: FilterConditionRow[]) =>
+				(await search(config, 'x', 10, rows)).map(([doc]) => doc.pageContent).sort();
+			expect(await contents([{ field: 'constructor', operator: 'is', value: 'red' }])).toEqual([
+				'tagged doc',
+			]);
+			expect(await contents([{ field: 'toString', operator: 'equals', value: '7' }])).toEqual([
+				'tagged doc',
+			]);
+			expect(await contents([{ field: '__proto__', operator: 'is', value: 'blue' }])).toEqual([
+				'tagged doc',
+			]);
+			expect(await contents([{ field: 'tenant', operator: 'is', value: 'acme' }])).toEqual([
+				'plain doc',
+				'tagged doc',
+			]);
+		});
 	});
 
 	it('excludes documents missing a filtered field', async () => {
@@ -719,6 +764,21 @@ describeIntegration('Valkey integration', () => {
 				'does not match metadata field "doc_key"',
 			);
 			expect(String(await client.hget(`${config.keyPrefix}faq-1`, 'content'))).toBe('Original');
+		});
+
+		it('updates a document in an index with a field named constructor', async () => {
+			const config = insertConfig('update-prototype-name', {
+				idField: 'doc_key',
+				declaredFields: [
+					{ name: 'constructor', type: 'TAG' },
+					{ name: 'tenant', type: 'TAG' },
+				],
+			});
+			await insert(config, [faq('faq-1', 'Original', { tenant: 'acme' })]);
+
+			// The incoming document has no constructor field.
+			await update(config, faq('faq-1', 'Changed', { tenant: 'acme' }), 'faq-1');
+			expect(String(await client.hget(`${config.keyPrefix}faq-1`, 'content'))).toBe('Changed');
 		});
 	});
 

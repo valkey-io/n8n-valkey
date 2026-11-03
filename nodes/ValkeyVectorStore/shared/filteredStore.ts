@@ -8,7 +8,12 @@ import { ValkeyUserError, missingIndexError } from './errors';
 import type { MetadataFilter } from './filters';
 import { assertDimension } from './indexSchema';
 import type { MetadataField } from './indexSchema';
-import { readDocumentId, stripKeyPrefix, validateDocumentMetadata } from './insert';
+import {
+	readDocumentId,
+	stripKeyPrefix,
+	validateDocumentMetadata,
+	withOwnMetadata,
+} from './insert';
 
 export interface N8nValkeyVectorStoreOptions {
 	/** Filter built from the node's configuration. Never taken from call arguments. */
@@ -105,7 +110,7 @@ export class N8nValkeyVectorStore extends ValkeyVectorStore {
 			assertDimension(this.indexName, this.options.indexDimension, vector.length);
 		}
 		if (!(await this.checkIndexExists())) throw missingIndexError(this.indexName);
-		return await super.addVectors(vectors, documents, options);
+		return await super.addVectors(vectors, withOwnMetadata(documents), options);
 	}
 
 	async similaritySearchVectorWithScore(query: number[], k: number): Promise<[Document, number][]> {

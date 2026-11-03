@@ -66,11 +66,21 @@ export type NumericRange = { min?: number; max?: number };
 export type MetadataFilter = Record<string, string | string[] | NumericRange>;
 
 /**
+ * True when `object` has `key` itself, not through its prototype. Field names
+ * come from the index or the user, so a field can be named like an
+ * Object.prototype member (`constructor`, `toString`, `__proto__`).
+ */
+export function hasOwn(object: object, key: string): boolean {
+	return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+/**
  * customSchema for the library, built from the index's own TAG/NUMERIC fields.
  * A TAG field's separator decides how the library joins array values.
  */
 export function toCustomSchema(fields: MetadataField[]): Record<string, CustomSchemaField> {
-	const schema: Record<string, CustomSchemaField> = {};
+	// No prototype, so a field named `__proto__` becomes an ordinary key.
+	const schema: Record<string, CustomSchemaField> = Object.create(null);
 	for (const field of fields) {
 		if (field.type !== 'TAG') {
 			schema[field.name] = { type: SchemaFieldTypes.NUMERIC };
@@ -145,7 +155,9 @@ export function buildMetadataFilter(
 	if (rows.length === 0) return undefined;
 
 	const byName = new Map<string, MetadataField>(indexFields.map((f) => [f.name, f]));
-	const filter: MetadataFilter = {};
+	// No prototype, so a field named like an Object.prototype member is never
+	// seen as already set.
+	const filter: MetadataFilter = Object.create(null);
 
 	rows.forEach((row, index) => {
 		const name = String(row.field ?? '').trim();
@@ -165,7 +177,7 @@ export function buildMetadataFilter(
 
 		if (type === 'TAG') {
 			const operator = readOperator(row, type, label, name);
-			if (name in filter) {
+			if (hasOwn(filter, name)) {
 				throw new ValkeyUserError(
 					`${label}: field "${name}" already has a condition. Combine the values into one "is any of" condition.`,
 					'invalid-filter',
@@ -213,7 +225,7 @@ export function buildMetadataFilter(
 		}
 
 		// Several conditions on one NUMERIC field (e.g. >= 2020 and <= 2024) intersect.
-		const existing = filter[name] as NumericRange | undefined;
+		const existing = hasOwn(filter, name) ? (filter[name] as NumericRange) : undefined;
 		const merged: NumericRange = { ...existing };
 		if (range.min !== undefined)
 			merged.min = merged.min === undefined ? range.min : Math.max(merged.min, range.min);

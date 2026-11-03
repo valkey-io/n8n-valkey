@@ -10,6 +10,7 @@ import {
 	insertBatch,
 	newInsertState,
 	validateDocumentMetadata,
+	withOwnMetadata,
 } from '../nodes/ValkeyVectorStore/shared/insert';
 import type { InsertDeps } from '../nodes/ValkeyVectorStore/shared/insert';
 import { HASH_INDEX } from './fixtures/ftInfo';
@@ -109,6 +110,42 @@ describe('validateDocumentMetadata', () => {
 				{ name: 'tags', type: 'TAG' },
 			]),
 		).toThrow('declared TAG but has value {"primary":"news"} (object)');
+	});
+
+	it.each(['__proto__', 'constructor', 'toString'])(
+		'allows a document without the field %s, instead of reading the inherited member',
+		(name) => {
+			expect(() =>
+				validateDocumentMetadata(docs(1, { tenant: 'acme' }), [
+					{ name, type: 'TAG' },
+					{ name: 'year', type: 'NUMERIC' },
+				]),
+			).not.toThrow();
+		},
+	);
+
+	it('checks a value the document sets for a field named constructor', () => {
+		expect(() =>
+			validateDocumentMetadata(docs(1, { constructor: 4 }), [{ name: 'constructor', type: 'TAG' }]),
+		).toThrow('metadata field "constructor" is declared TAG but has value 4 (number)');
+	});
+});
+
+describe('withOwnMetadata', () => {
+	it('keeps content, ID and metadata, with no inherited members', () => {
+		const original = new Document({
+			pageContent: 'text',
+			metadata: { tenant: 'acme', tags: ['a'] },
+			id: 'doc-1',
+		});
+		const [copy] = withOwnMetadata([original]);
+
+		expect(copy.pageContent).toBe('text');
+		expect(copy.id).toBe('doc-1');
+		expect(JSON.stringify(copy.metadata)).toBe(JSON.stringify(original.metadata));
+		expect(Object.getPrototypeOf(copy.metadata)).toBeNull();
+		expect(copy.metadata.constructor).toBeUndefined();
+		expect(original.metadata.constructor).toBe(Object);
 	});
 });
 

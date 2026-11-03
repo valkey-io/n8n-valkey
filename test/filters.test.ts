@@ -252,3 +252,45 @@ describe('buildMetadataFilter', () => {
 		expect(() => build([{ field: '' }])).toThrow('Metadata Filter condition 1: no field selected');
 	});
 });
+
+// Valkey accepts these as field names; plain object lookups would find the
+// Object.prototype members instead of the fields.
+describe.each(['__proto__', 'constructor', 'toString'])('a field named %s', (name) => {
+	const protoFields: MetadataField[] = [
+		{ name, type: 'TAG' },
+		{ name: 'year', type: 'NUMERIC' },
+	];
+	const buildProto = (rows: object[]) => buildMetadataFilter(rows, protoFields, 'kb');
+
+	it('is an own key of customSchema', () => {
+		const schema = toCustomSchema(protoFields);
+		expect(Object.keys(schema)).toEqual([name, 'year']);
+		expect(schema[name]).toEqual({ type: 'TAG' });
+	});
+
+	it('accepts one "Is" condition and keeps it as an own key', () => {
+		const filter = buildProto([{ field: name, operator: 'is', value: 'a' }]);
+		expect(Object.keys(filter ?? {})).toEqual([name]);
+		expect(filter?.[name]).toBe('a');
+	});
+
+	it('still rejects a second condition on the same field', () => {
+		expect(() =>
+			buildProto([
+				{ field: name, operator: 'is', value: 'a' },
+				{ field: name, operator: 'is', value: 'b' },
+			]),
+		).toThrow(`Metadata Filter condition 2 ("${name}"): field "${name}" already has a condition.`);
+	});
+});
+
+describe('a NUMERIC field named like an Object.prototype member', () => {
+	it.each(['constructor', 'toString'])('starts %s from no range', (name) => {
+		const filter = buildMetadataFilter(
+			[{ field: name, operator: 'gte', value: '2020' }],
+			[{ name, type: 'NUMERIC' }],
+			'kb',
+		);
+		expect(filter?.[name]).toEqual({ min: 2020 });
+	});
+});
