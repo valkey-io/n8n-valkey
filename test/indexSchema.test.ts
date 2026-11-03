@@ -21,7 +21,9 @@ describe('normalizeIndexInfo', () => {
 		const info = normalizeIndexInfo(RECORDED_HASH_INDEX as never);
 		expect(info.dataType).toBe('HASH');
 		expect(info.prefixes).toEqual(['probe5:']);
-		expect(info.vectors).toEqual([{ name: 'v', dim: 4, metric: 'COSINE', algorithm: 'HNSW' }]);
+		expect(info.vectors).toEqual([
+			{ name: 'v', attribute: 'v', dim: 4, metric: 'COSINE', algorithm: 'HNSW' },
+		]);
 		expect(metadataFields(info, 'metadata')).toEqual([{ name: 'year', type: 'NUMERIC' }]);
 	});
 
@@ -30,7 +32,13 @@ describe('normalizeIndexInfo', () => {
 		expect(info.dataType).toBe('HASH');
 		expect(info.prefixes).toEqual(['doc:kb:']);
 		expect(info.vectors).toEqual([
-			{ name: 'content_vector', dim: 1536, metric: 'COSINE', algorithm: 'HNSW' },
+			{
+				name: 'content_vector',
+				attribute: 'content_vector',
+				dim: 1536,
+				metric: 'COSINE',
+				algorithm: 'HNSW',
+			},
 		]);
 		expect(metadataFields(info, 'metadata')).toEqual([
 			{ name: 'source', type: 'TAG' },
@@ -55,11 +63,19 @@ describe('normalizeIndexInfo', () => {
 		});
 		expect(info.dataType).toBe('HASH');
 		expect(info.prefixes).toEqual(['doc:kb:']);
-		expect(info.vectors[0]).toEqual({ name: 'v', dim: 4, metric: 'L2', algorithm: 'FLAT' });
+		expect(info.vectors[0]).toEqual({
+			name: 'v',
+			attribute: 'v',
+			dim: 4,
+			metric: 'L2',
+			algorithm: 'FLAT',
+		});
 	});
 
 	// Attribute entries recorded on 2026-10-29 with Glide from two servers, for
-	// `metadata.t TAG SEPARATOR "|" CASESENSITIVE` and a default `metadata.d TAG`.
+	// `metadata.t TAG SEPARATOR "|" CASESENSITIVE` and a default `metadata.d TAG`,
+	// with the hash fields renamed to the `metadata_<name>` layout the library
+	// now writes. The SEPARATOR and CASESENSITIVE shapes are as recorded.
 	const vectorAttribute = [
 		'identifier',
 		'v',
@@ -81,7 +97,7 @@ describe('normalizeIndexInfo', () => {
 		const info = withAttributes(
 			[
 				'identifier',
-				'metadata.d',
+				'metadata_d',
 				'attribute',
 				'metadata_d',
 				'user_indexed_memory',
@@ -97,7 +113,7 @@ describe('normalizeIndexInfo', () => {
 			],
 			[
 				'identifier',
-				'metadata.t',
+				'metadata_t',
 				'attribute',
 				'metadata_t',
 				'user_indexed_memory',
@@ -122,7 +138,7 @@ describe('normalizeIndexInfo', () => {
 		const info = withAttributes(
 			[
 				'identifier',
-				'metadata.d',
+				'metadata_d',
 				'attribute',
 				'metadata_d',
 				'type',
@@ -134,7 +150,7 @@ describe('normalizeIndexInfo', () => {
 			],
 			[
 				'identifier',
-				'metadata.t',
+				'metadata_t',
 				'attribute',
 				'metadata_t',
 				'type',
@@ -153,14 +169,14 @@ describe('normalizeIndexInfo', () => {
 	});
 
 	it('reads a bare CASESENSITIVE flag at the end of an entry', () => {
-		const info = withAttributes(['identifier', 'metadata.t', 'type', 'TAG', 'CASESENSITIVE']);
+		const info = withAttributes(['identifier', 'metadata_t', 'type', 'TAG', 'CASESENSITIVE']);
 		expect(metadataFields(info, 'metadata')).toEqual([
 			{ name: 't', type: 'TAG', caseSensitive: true },
 		]);
 	});
 
 	it('still skips a malformed odd-length entry', () => {
-		const info = withAttributes(['identifier', 'metadata.t', 'type', 'TAG', 'size']);
+		const info = withAttributes(['identifier', 'metadata_t', 'type', 'TAG', 'size']);
 		expect(metadataFields(info, 'metadata')).toEqual([]);
 	});
 });
@@ -269,6 +285,54 @@ describe('assertCompatible', () => {
 				'retrieve',
 			),
 		).not.toThrow();
+	});
+
+	describe('metadata field names', () => {
+		const withMetadataField = (identifier: string, attribute: string) => ({
+			...info,
+			fields: [
+				...info.fields.filter((f) => f.type === 'VECTOR'),
+				{ identifier, attribute, type: 'TAG' },
+			],
+		});
+
+		it.each(['insert', 'retrieve'] as const)(
+			'rejects an index that reads the earlier `metadata.<name>` hash field on %s',
+			(mode) => {
+				expect(() =>
+					assertCompatible(withMetadataField('metadata.tenant', 'metadata_tenant'), config, mode),
+				).toThrow(
+					expect.objectContaining({
+						code: 'index-incompatible',
+						message: expect.stringContaining(
+							'reads metadata field "tenant" from the hash field "metadata.tenant", which an earlier version of this node wrote',
+						) as unknown,
+					}),
+				);
+			},
+		);
+
+		it('rejects a metadata field queried under another name', () => {
+			expect(() =>
+				assertCompatible(withMetadataField('metadata_tenant', 't'), config, 'retrieve'),
+			).toThrow(
+				'names metadata field "metadata_tenant" "t" in queries, but the node queries it as "metadata_tenant"',
+			);
+		});
+
+		it('rejects a field queried as a metadata field but read from another hash field', () => {
+			expect(() =>
+				assertCompatible(withMetadataField('tenant', 'metadata_tenant'), config, 'retrieve'),
+			).toThrow(
+				'reads metadata field "metadata_tenant" from the hash field "tenant", but the node writes it to "metadata_tenant"',
+			);
+		});
+
+		it('ignores TAG and NUMERIC fields outside the metadata key', () => {
+			expect(() =>
+				assertCompatible(withMetadataField('category', 'cat'), config, 'retrieve'),
+			).not.toThrow();
+		});
 	});
 
 	it('throws rather than logging', () => {

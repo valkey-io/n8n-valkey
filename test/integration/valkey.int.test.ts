@@ -243,9 +243,9 @@ describeIntegration('Valkey integration', () => {
 		// Both documents written by the second Insert carry every indexed field of the index.
 		for (const id of ['1', '2']) {
 			const key = `${created.keyPrefix}${id}`;
-			expect(String(await client.hget(key, 'metadata.source'))).toBe('x.pdf');
-			expect(String(await client.hget(key, 'metadata.tenant'))).toBe('acme');
-			expect(String(await client.hget(key, 'metadata.year'))).toBe('2024');
+			expect(String(await client.hget(key, 'metadata_source'))).toBe('x.pdf');
+			expect(String(await client.hget(key, 'metadata_tenant'))).toBe('acme');
+			expect(String(await client.hget(key, 'metadata_year'))).toBe('2024');
 		}
 
 		const acme = await search(created, 'first', 10, [
@@ -276,8 +276,6 @@ describeIntegration('Valkey integration', () => {
 			String(embeddings.dimension),
 			'DISTANCE_METRIC',
 			'COSINE',
-			'metadata.tenant',
-			'AS',
 			'metadata_tenant',
 			'TAG',
 			'SEPARATOR',
@@ -301,6 +299,106 @@ describeIntegration('Valkey integration', () => {
 		expect(await names('acme')).toEqual(['acme only', 'shared']);
 		expect(await names('globex')).toEqual(['shared']);
 		expect(await names('ACME')).toEqual([]);
+	});
+
+	describe('an index created elsewhere whose fields have their own attribute names', () => {
+		/** FT.CREATE for a HASH index under the config's prefix, with the given schema. */
+		async function createIndex(config: InsertConfig, schema: string[]): Promise<void> {
+			await client.customCommand([
+				'FT.CREATE',
+				config.indexName,
+				'ON',
+				'HASH',
+				'PREFIX',
+				'1',
+				config.keyPrefix,
+				'SCHEMA',
+				...schema,
+			]);
+		}
+
+		const vectorSchema = (attribute: string) => [
+			'content_vector',
+			'AS',
+			attribute,
+			'VECTOR',
+			'FLAT',
+			'6',
+			'TYPE',
+			'FLOAT32',
+			'DIM',
+			String(embeddings.dimension),
+			'DISTANCE_METRIC',
+			'COSINE',
+		];
+
+		it('rejects a vector field queried under another name on insert and retrieve, and writes nothing', async () => {
+			const config = insertConfig('alias-vector');
+			await createIndex(config, vectorSchema('emb'));
+			const message =
+				'names its VECTOR field "content_vector" "emb" in queries, but the node queries it as "content_vector"';
+
+			await expect(search(config, 'x', 1)).rejects.toThrow(message);
+			await expect(
+				insert(config, [new Document({ pageContent: 'doc', metadata: {} })]),
+			).rejects.toThrow(message);
+			expect(await countKeys(client, config.keyPrefix)).toBe(0);
+		});
+
+		it('rejects a metadata field queried under another name on insert and retrieve, even when it is not declared', async () => {
+			const config = insertConfig('alias-metadata');
+			await createIndex(config, [
+				...vectorSchema('content_vector'),
+				'metadata_year',
+				'NUMERIC',
+				'metadata_tenant',
+				'AS',
+				't',
+				'TAG',
+			]);
+			const message =
+				'names metadata field "metadata_tenant" "t" in queries, but the node queries it as "metadata_tenant"';
+
+			await expect(search(config, 'x', 1)).rejects.toThrow(message);
+			await expect(
+				insert(config, [new Document({ pageContent: 'doc', metadata: { year: 2024 } })]),
+			).rejects.toThrow(message);
+			expect(await countKeys(client, config.keyPrefix)).toBe(0);
+		});
+
+		it('rejects an index created by an earlier version of the node on insert and retrieve', async () => {
+			const config = insertConfig('earlier-layout');
+			// The earlier layout: values in `metadata.<name>`, aliased to `metadata_<name>`.
+			await createIndex(config, [
+				...vectorSchema('content_vector'),
+				'metadata.tenant',
+				'AS',
+				'metadata_tenant',
+				'TAG',
+			]);
+			const message =
+				'reads metadata field "tenant" from the hash field "metadata.tenant", which an earlier version of this node wrote';
+
+			await expect(search(config, 'x', 1)).rejects.toThrow(message);
+			await expect(
+				insert(config, [new Document({ pageContent: 'doc', metadata: { tenant: 'acme' } })]),
+			).rejects.toThrow(message);
+			expect(await countKeys(client, config.keyPrefix)).toBe(0);
+		});
+
+		it('accepts fields whose attribute names match the ones the node queries', async () => {
+			const config = insertConfig('alias-matching');
+			await createIndex(config, [...vectorSchema('content_vector'), 'metadata_tenant', 'TAG']);
+
+			await insert(config, [
+				new Document({ pageContent: 'acme doc', metadata: { tenant: 'acme' } }),
+			]);
+
+			const results = await search(config, 'x', 10, [
+				{ field: 'tenant', operator: 'is', value: 'acme' },
+			]);
+			expect(results.map(([doc]) => doc.pageContent)).toEqual(['acme doc']);
+		});
 	});
 
 	it('excludes documents missing a filtered field', async () => {
@@ -586,8 +684,8 @@ describeIntegration('Valkey integration', () => {
 			expect(String(await client.hget(key, 'content'))).toBe('New answer');
 			expect(await storedMetadata(key)).toMatchObject({ tenant: 'globex', doc_key: 'faq-1' });
 			// Indexed copies follow the new metadata; the dropped "year" is gone.
-			expect(String(await client.hget(key, 'metadata.tenant'))).toBe('globex');
-			expect(await client.hexists(key, 'metadata.year')).toBe(false);
+			expect(String(await client.hget(key, 'metadata_tenant'))).toBe('globex');
+			expect(await client.hexists(key, 'metadata_year')).toBe(false);
 			const byNew = await search(config, 'New answer', 10, [
 				{ field: 'tenant', operator: 'is', value: 'globex' },
 			]);

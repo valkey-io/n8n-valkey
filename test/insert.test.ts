@@ -465,8 +465,8 @@ describe('insertBatch writes the metadata fields of an existing index', () => {
 			});
 			await insertBatch(config, embeddings(), [doc], newInsertState(), deps);
 			const fields = hset.mock.calls[0][1] as Record<string, unknown>;
-			expect(fields['metadata.source']).toBe('a.pdf');
-			expect(fields['metadata.year']).toBe('2024');
+			expect(fields['metadata_source']).toBe('a.pdf');
+			expect(fields['metadata_year']).toBe('2024');
 		} finally {
 			ftInfo.mockRestore();
 			hset.mockRestore();
@@ -481,13 +481,13 @@ describe('insertBatch writes the metadata fields of an existing index', () => {
 			const deps = defaultInsertDeps(async () => client as never);
 			const piped = normalizeIndexInfo(HASH_INDEX);
 			piped.fields = piped.fields.map((f) =>
-				f.identifier === 'metadata.source' ? { ...f, separator: '|', caseSensitive: true } : f,
+				f.identifier === 'metadata_source' ? { ...f, separator: '|', caseSensitive: true } : f,
 			);
 			deps.readInfo = async () => piped;
 			const doc = new Document({ pageContent: 'x', metadata: { source: ['a.pdf', 'b.pdf'] } });
 			await insertBatch(baseConfig, embeddings(), [doc], newInsertState(), deps);
 			const fields = hset.mock.calls[0][1] as Record<string, unknown>;
-			expect(fields['metadata.source']).toBe('a.pdf|b.pdf');
+			expect(fields['metadata_source']).toBe('a.pdf|b.pdf');
 		} finally {
 			ftInfo.mockRestore();
 			hset.mockRestore();

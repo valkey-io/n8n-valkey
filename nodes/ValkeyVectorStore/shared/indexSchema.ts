@@ -12,8 +12,10 @@ export function isDistanceMetric(value: string): value is DistanceMetric {
 export type MetadataFieldType = 'TAG' | 'NUMERIC';
 
 export interface IndexField {
-	/** Hash field the index reads, e.g. `metadata.source` or `content_vector`. */
+	/** Hash field the index reads, e.g. `metadata_source` or `content_vector`. */
 	identifier: string;
+	/** Name queries use for the field (its alias), e.g. `metadata_source`. Same as identifier when the index sets none. */
+	attribute: string;
 	type: string;
 	/** TAG only: the character the index splits values on, when it is not the default `,`. */
 	separator?: string;
@@ -22,7 +24,10 @@ export interface IndexField {
 }
 
 export interface IndexVectorField {
+	/** Hash field that holds the vector. */
 	name: string;
+	/** Name KNN queries use for the field. */
+	attribute: string;
 	dim: number;
 	metric: string;
 	algorithm: string;
@@ -145,8 +150,10 @@ export function normalizeIndexInfo(raw: FtInfoReturnType | Record<string, Raw>):
 			const field = asAttributeRecord(entry);
 			if (!field) continue;
 			const identifier = str(pick(field, 'identifier', 'field_name', 'attribute'));
+			// ValkeySearch sends the alias as `attribute`; Glide's documented shape calls it `field_name`.
+			const attribute = str(pick(field, 'attribute', 'field_name')) || identifier;
 			const type = str(pick(field, 'type')).toUpperCase();
-			const parsed: IndexField = { identifier, type };
+			const parsed: IndexField = { identifier, attribute, type };
 			if (type === 'TAG') {
 				const separator = str(pick(field, 'SEPARATOR'));
 				if (separator && separator !== ',') parsed.separator = separator;
@@ -163,6 +170,7 @@ export function normalizeIndexInfo(raw: FtInfoReturnType | Record<string, Raw>):
 					: algorithmRaw;
 				vectors.push({
 					name: identifier,
+					attribute,
 					dim: Number(pick(params, 'dimension', 'dimensions', 'dim')),
 					metric: str(pick(params, 'distance_metric', 'distance')).toUpperCase(),
 					algorithm: str(algorithm).toUpperCase(),
@@ -175,11 +183,14 @@ export function normalizeIndexInfo(raw: FtInfoReturnType | Record<string, Raw>):
 }
 
 /**
- * TAG and NUMERIC fields stored under `<metadataKey>.<name>`. TAG fields keep
- * the index's separator and CASESENSITIVE setting, so writes match the index.
+ * TAG and NUMERIC fields stored in the hash field `<metadataKey>_<name>`, the
+ * name the library writes and queries. TAG fields keep the index's separator
+ * and CASESENSITIVE setting, so writes match the index. Selected by hash
+ * field, so a field queried under another name is returned too;
+ * assertCompatible rejects such an index.
  */
 export function metadataFields(info: IndexInfo, metadataKey: string): MetadataField[] {
-	const prefix = `${metadataKey}.`;
+	const prefix = `${metadataKey}_`;
 	const result: MetadataField[] = [];
 	for (const field of info.fields) {
 		if (!field.identifier.startsWith(prefix)) continue;
@@ -276,6 +287,43 @@ export function assertCompatible(
 			`${idx} has no VECTOR field named "${config.vectorKey}" (vector fields found: ${found}). Set Vector Key to match the index.`,
 			'index-incompatible',
 		);
+	}
+
+	// Searches address fields by attribute name, so an alias the node does not
+	// expect makes every query fail on the server.
+	if (vector.attribute !== config.vectorKey) {
+		throw new ValkeyUserError(
+			`${idx} names its VECTOR field "${config.vectorKey}" "${vector.attribute}" in queries, but the node queries it as "${config.vectorKey}". Recreate the index without an alias for the vector field.`,
+			'index-incompatible',
+		);
+	}
+
+	// The library writes each metadata value to the hash field
+	// `<metadataKey>_<name>` and queries the index attribute of the same name,
+	// so every metadata field must use that one name, with no alias.
+	const metadataPrefix = `${config.metadataKey}_`;
+	const earlierLayoutPrefix = `${config.metadataKey}.`;
+	for (const field of info.fields) {
+		if (field.type !== 'TAG' && field.type !== 'NUMERIC') continue;
+		if (field.identifier.startsWith(earlierLayoutPrefix)) {
+			const name = field.identifier.slice(earlierLayoutPrefix.length);
+			throw new ValkeyUserError(
+				`${idx} reads metadata field "${name}" from the hash field "${field.identifier}", which an earlier version of this node wrote. This version writes "${metadataPrefix}${name}", so documents inserted now would not match filters. ${RECREATE_HINT}`,
+				'index-incompatible',
+			);
+		}
+		if (field.identifier.startsWith(metadataPrefix) && field.attribute !== field.identifier) {
+			throw new ValkeyUserError(
+				`${idx} names metadata field "${field.identifier}" "${field.attribute}" in queries, but the node queries it as "${field.identifier}". ${RECREATE_HINT}`,
+				'index-incompatible',
+			);
+		}
+		if (field.attribute.startsWith(metadataPrefix) && field.identifier !== field.attribute) {
+			throw new ValkeyUserError(
+				`${idx} reads metadata field "${field.attribute}" from the hash field "${field.identifier}", but the node writes it to "${field.attribute}". ${RECREATE_HINT}`,
+				'index-incompatible',
+			);
+		}
 	}
 
 	if (vector.metric && vector.metric !== config.metric) {

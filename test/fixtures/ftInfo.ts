@@ -25,8 +25,8 @@ export const HASH_INDEX = {
 				algorithm: 'HNSW',
 			},
 		},
-		{ identifier: 'metadata.source', type: 'TAG', field_name: 'metadata.source', option: '' },
-		{ identifier: 'metadata.year', type: 'NUMERIC', field_name: 'metadata.year', option: '' },
+		{ identifier: 'metadata_source', type: 'TAG', field_name: 'metadata_source', option: '' },
+		{ identifier: 'metadata_year', type: 'NUMERIC', field_name: 'metadata_year', option: '' },
 	],
 };
 
@@ -47,6 +47,8 @@ export const JSON_INDEX = {
  * Recorded from valkey/valkey-bundle:latest (Valkey 9.1.2, search 1.2.1) via
  * GlideFt.info, 2026-10-08. Glide passes the server's flat key/value arrays
  * through for index_definition, each attribute and the vector index block.
+ * The metadata identifier was changed from `metadata.year` to
+ * `metadata_year`, the hash field the library now writes.
  */
 export const RECORDED_HASH_INDEX = {
 	index_name: 'probe5',
@@ -54,7 +56,7 @@ export const RECORDED_HASH_INDEX = {
 	attributes: [
 		[
 			'identifier',
-			'metadata.year',
+			'metadata_year',
 			'attribute',
 			'metadata_year',
 			'user_indexed_memory',
