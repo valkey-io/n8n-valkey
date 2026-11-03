@@ -56,13 +56,26 @@ jobs:
         run: 'npm run test:unit -- --runInBand'
 
   integration-test:
+    name: integration-test (${{ matrix.label }})
     runs-on: ubuntu-latest
+
+    # One job per valkey-search line that ElastiCache runs. valkey-bundle has no
+    # 8.2 image: ElastiCache 8.2 is Valkey 8.1 with valkey-search 1.0.x, which
+    # 8.1.x images ship; 9.1.x images ship valkey-search 1.2.x.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: valkey-search 1.0.x
+            image: valkey/valkey-bundle:8.1.11
+          - label: valkey-search 1.2.x
+            image: valkey/valkey-bundle:9.1.4
 
     services:
       valkey:
         # valkey-bundle ships valkey-server with valkey-search loaded (FT.* commands)
-        # and valkey-cli for the health check. Same image as langchainjs-valkey CI.
-        image: valkey/valkey-bundle:8.1.10
+        # and valkey-cli for the health check.
+        image: ${{ matrix.image }}
         # The image's entrypoint appends VALKEY_EXTRA_FLAGS to valkey-server.
         # A password lets the wrong-password integration test run.
         env:
@@ -86,6 +99,22 @@ jobs:
 
       - name: Install dependencies
         run: 'npm ci'
+
+      - name: Show server and search versions
+        run: |
+          node -e "
+            const { GlideClient } = require('@valkey/valkey-glide');
+            (async () => {
+              const client = await GlideClient.createClient({
+                addresses: [{ host: 'localhost', port: 6379 }],
+                credentials: { password: 'ci-test-password' },
+              });
+              const info = String(await client.info());
+              console.log(info.match(/valkey_version:\S+/)[0]);
+              console.log(JSON.stringify(await client.customCommand(['MODULE', 'LIST'])));
+              client.close();
+            })();
+          "
 
       - name: Run integration tests
         run: 'npm run test:int -- --runInBand'
