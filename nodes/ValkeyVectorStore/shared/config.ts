@@ -256,12 +256,34 @@ function readTtl(options: Record<string, unknown>): number | undefined {
 	return ttl > 0 ? ttl : undefined;
 }
 
+const VECTOR_ALGORITHMS: readonly string[] = Object.values(VectorAlgorithms);
+
+function isVectorAlgorithm(value: string): value is VectorAlgorithms {
+	return VECTOR_ALGORITHMS.includes(value);
+}
+
+/**
+ * Reads Vector Algorithm, case-insensitively, defaulting to HNSW when blank.
+ * An unknown value is rejected: the algorithm is fixed when the index is
+ * created, so silently using HNSW could only be undone by clearing the index.
+ */
+function readAlgorithm(value: unknown): VectorAlgorithms {
+	const algorithm = nonEmpty(value, VectorAlgorithms.HNSW).toUpperCase();
+	if (!isVectorAlgorithm(algorithm)) {
+		throw new ValkeyUserError(
+			`Vector Algorithm "${algorithm}" is not supported. Use ${VECTOR_ALGORITHMS.join(', ')}.`,
+			'invalid-parameter',
+		);
+	}
+	return algorithm;
+}
+
 export function readInsertConfig(get: ParamReader): InsertConfig {
 	const base = readStoreConfig(get);
 	const options = (get('insertOptions', {}) ?? {}) as Record<string, unknown>;
 	return {
 		...base,
-		algorithm: options.algorithm === 'FLAT' ? VectorAlgorithms.FLAT : VectorAlgorithms.HNSW,
+		algorithm: readAlgorithm(options.algorithm),
 		ttl: readTtl(options),
 		clearIndex: options.clearIndex === true,
 		declaredFields: readDeclaredFields(get),

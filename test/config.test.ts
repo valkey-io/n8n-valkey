@@ -138,6 +138,23 @@ describe('readInsertConfig', () => {
 		);
 		expect(read).toThrow(expect.objectContaining({ code: 'invalid-parameter' }));
 	});
+
+	it.each([
+		['flat', 'FLAT'],
+		[' hnsw ', 'HNSW'],
+		['', 'HNSW'],
+	])('reads Vector Algorithm %p as %p', (algorithm, expected) => {
+		expect(
+			readInsertConfig(params({ valkeyIndex: 'kb', insertOptions: { algorithm } })).algorithm,
+		).toBe(expected);
+	});
+
+	it('rejects an unknown Vector Algorithm instead of using HNSW', () => {
+		const read = () =>
+			readInsertConfig(params({ valkeyIndex: 'kb', insertOptions: { algorithm: 'IVF' } }));
+		expect(read).toThrow('Vector Algorithm "IVF" is not supported. Use FLAT, HNSW.');
+		expect(read).toThrow(expect.objectContaining({ code: 'invalid-parameter' }));
+	});
 });
 
 describe('readUpdateConfig', () => {
