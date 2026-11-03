@@ -97,6 +97,29 @@ describe('readStoreConfig', () => {
 		expect(read('')).toBeUndefined();
 		expect(read(undefined)).toBeUndefined();
 	});
+
+	it.each([
+		['Key Prefix', { indexOptions: { keyPrefix: { tenant: 'a' } } }, 'a value of type object'],
+		['Content Key', { indexOptions: { contentKey: ['a'] } }, 'a list'],
+		['Metadata Key', { indexOptions: { metadataKey: true } }, 'a value of type boolean'],
+		['Vector Key', { indexOptions: { vectorKey: {} } }, 'a value of type object'],
+		['ID Metadata Field', { indexOptions: { idMetadataField: {} } }, 'a value of type object'],
+		['Distance Metric', { indexOptions: { distanceMetric: {} } }, 'a value of type object'],
+	])('rejects a %s that is not text instead of using "[object Object]"', (label, values, kind) => {
+		const read = () => readStoreConfig(params({ valkeyIndex: 'kb', ...values }));
+		expect(read).toThrow(`${label} must be text, got ${kind}.`);
+		expect(read).toThrow(expect.objectContaining({ code: 'invalid-parameter' }));
+	});
+
+	it('rejects a Valkey Index that is not text', () => {
+		expect(() => readStoreConfig(params({ valkeyIndex: { name: 'kb' } }))).toThrow(
+			'Valkey Index must be text, got a value of type object.',
+		);
+	});
+
+	it('accepts a number as a text option', () => {
+		expect(readStoreConfig(params({ valkeyIndex: 2024 })).indexName).toBe('2024');
+	});
 });
 
 describe('readInsertConfig', () => {
@@ -154,6 +177,12 @@ describe('readInsertConfig', () => {
 			readInsertConfig(params({ valkeyIndex: 'kb', insertOptions: { algorithm: 'IVF' } }));
 		expect(read).toThrow('Vector Algorithm "IVF" is not supported. Use FLAT, HNSW.');
 		expect(read).toThrow(expect.objectContaining({ code: 'invalid-parameter' }));
+	});
+
+	it('rejects a Vector Algorithm that is not text', () => {
+		expect(() =>
+			readInsertConfig(params({ valkeyIndex: 'kb', insertOptions: { algorithm: {} } })),
+		).toThrow('Vector Algorithm must be text, got a value of type object.');
 	});
 });
 
@@ -261,6 +290,8 @@ describe('readDeclaredFields', () => {
 		[[{ name: 'tenant:id' }], 'contains ":"'],
 		[[{ name: 'a@b' }], 'contains "@"'],
 		[[{ name: 'a\tb' }], 'contains "\\t"'],
+		[[{ name: { key: 'a' } }], 'a field name must be text, got a value of type object.'],
+		[[{ name: 'a', type: ['TAG'] }], 'the type of "a" must be text, got a list.'],
 	])('rejects %j', (fields, message) => {
 		expect(() => readDeclaredFields(params({ metadataFields: { fields } }))).toThrow(message);
 	});
@@ -321,6 +352,18 @@ describe('parseCredentials', () => {
 
 	it('requires a host', () => {
 		expect(() => parseCredentials({ host: '  ' })).toThrow('no host');
+	});
+
+	it.each([
+		['Host', { host: { name: 'h' } }],
+		['Username', { host: 'h', username: { name: 'alice' }, password: 'p' }],
+		['Password', { host: 'h', password: { value: 'p' } }],
+	])('rejects a %s that is not text', (label, data) => {
+		const read = () => parseCredentials(data as never);
+		expect(read).toThrow(
+			`The Valkey credential's ${label} must be text, got a value of type object.`,
+		);
+		expect(read).toThrow(expect.objectContaining({ code: 'invalid-credential' }));
 	});
 
 	it('rejects a username without a password instead of connecting as the default user', () => {

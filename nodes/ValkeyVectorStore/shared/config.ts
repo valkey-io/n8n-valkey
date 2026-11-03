@@ -52,9 +52,22 @@ interface WholeNumberRules {
 	code: ValkeyErrorCode;
 }
 
-function nonEmpty(value: unknown, fallback: string): string {
-	const text = String(value ?? '').trim();
-	return text === '' ? fallback : text;
+/**
+ * Reads a text parameter. An expression can return any value, and String()
+ * would turn an object into "[object Object]", which is a valid key prefix or
+ * index name, so only text and numbers are accepted. A missing value is ''.
+ */
+function text(label: string, value: unknown, code: ValkeyErrorCode = 'invalid-parameter'): string {
+	if (value === undefined || value === null) return '';
+	if (typeof value === 'string') return value;
+	if (typeof value === 'number') return String(value);
+	const kind = Array.isArray(value) ? 'a list' : `a value of type ${typeof value}`;
+	throw new ValkeyUserError(`${label} must be text, got ${kind}.`, code);
+}
+
+function nonEmpty(label: string, value: unknown, fallback: string): string {
+	const trimmed = text(label, value).trim();
+	return trimmed === '' ? fallback : trimmed;
 }
 
 /**
@@ -104,11 +117,13 @@ function wholeNumber(label: string, value: unknown, rules: WholeNumberRules): nu
 }
 
 export function parseCredentials(data: ICredentialDataDecryptedObject): ValkeyCredentials {
-	const host = String(data.host ?? '').trim();
+	const host = text("The Valkey credential's Host", data.host, 'invalid-credential').trim();
 	if (!host)
 		throw new ValkeyUserError('The Valkey credential has no host set.', 'invalid-credential');
-	const username = data.username ? String(data.username) : undefined;
-	const password = data.password ? String(data.password) : undefined;
+	const username =
+		text("The Valkey credential's Username", data.username, 'invalid-credential') || undefined;
+	const password =
+		text("The Valkey credential's Password", data.password, 'invalid-credential') || undefined;
 	// Glide sends a username only together with a password, so a username on its
 	// own would silently connect as the default user.
 	if (username && !password) {
@@ -125,8 +140,8 @@ export function parseCredentials(data: ICredentialDataDecryptedObject): ValkeyCr
 			max: 65535,
 			code: 'invalid-credential',
 		}),
-		username: data.username ? String(data.username) : undefined,
-		password: data.password ? String(data.password) : undefined,
+		username,
+		password,
 		// Defaults to true, like the credential's SSL/TLS toggle.
 		tls: booleanFlag("The Valkey credential's SSL/TLS", data.tls, true, 'invalid-credential'),
 		database: wholeNumber("The Valkey credential's Database Number", data.database, {
@@ -149,11 +164,11 @@ export function validateMetadataKey(metadataKey: string): void {
 }
 
 export function readStoreConfig(get: ParamReader): StoreConfig {
-	const indexName = String(get('valkeyIndex', '') ?? '').trim();
+	const indexName = text('Valkey Index', get('valkeyIndex', '')).trim();
 	if (!indexName) throw new ValkeyUserError('Valkey Index is required.', 'invalid-parameter');
 
 	const options = (get('indexOptions', {}) ?? {}) as Record<string, unknown>;
-	const metric = nonEmpty(options.distanceMetric, 'COSINE').toUpperCase();
+	const metric = nonEmpty('Distance Metric', options.distanceMetric, 'COSINE').toUpperCase();
 	if (!isDistanceMetric(metric)) {
 		throw new ValkeyUserError(
 			`Distance Metric "${metric}" is not supported. Use ${DISTANCE_METRICS.join(', ')}.`,
@@ -161,11 +176,11 @@ export function readStoreConfig(get: ParamReader): StoreConfig {
 		);
 	}
 
-	const idField = String(options.idMetadataField ?? '').trim();
-	const metadataKey = nonEmpty(options.metadataKey, 'metadata');
+	const idField = text('ID Metadata Field', options.idMetadataField).trim();
+	const metadataKey = nonEmpty('Metadata Key', options.metadataKey, 'metadata');
 	validateMetadataKey(metadataKey);
 
-	const keyPrefix = nonEmpty(options.keyPrefix, '');
+	const keyPrefix = nonEmpty('Key Prefix', options.keyPrefix, '');
 	// Valkey matches key prefixes as plain strings, so the default prefix of an
 	// index named "kb" (doc:kb:) would also cover the keys of "kb:archive"
 	// (doc:kb:archive:). Delete Index and Documents would then delete the other
@@ -180,9 +195,9 @@ export function readStoreConfig(get: ParamReader): StoreConfig {
 	return {
 		indexName,
 		keyPrefix: keyPrefix || `doc:${indexName}:`,
-		contentKey: nonEmpty(options.contentKey, 'content'),
+		contentKey: nonEmpty('Content Key', options.contentKey, 'content'),
 		metadataKey,
-		vectorKey: nonEmpty(options.vectorKey, 'content_vector'),
+		vectorKey: nonEmpty('Vector Key', options.vectorKey, 'content_vector'),
 		metric,
 		...(idField ? { idField } : {}),
 	};
@@ -204,7 +219,7 @@ export function readDeclaredFields(get: ParamReader): MetadataField[] {
 	const fields: MetadataField[] = [];
 	const seen = new Set<string>();
 	for (const row of raw.fields ?? []) {
-		const name = String(row.name ?? '').trim();
+		const name = text('Metadata Fields to Index: a field name', row.name).trim();
 		if (!name)
 			throw new ValkeyUserError(
 				'Metadata Fields to Index: a field has no name.',
@@ -234,7 +249,11 @@ export function readDeclaredFields(get: ParamReader): MetadataField[] {
 				'invalid-parameter',
 			);
 		seen.add(name);
-		const type = String(row.type ?? 'TAG').toUpperCase();
+		const type = nonEmpty(
+			`Metadata Fields to Index: the type of "${name}"`,
+			row.type,
+			'TAG',
+		).toUpperCase();
 		if (type !== 'TAG' && type !== 'NUMERIC') {
 			throw new ValkeyUserError(
 				`Metadata Fields to Index: "${name}" has type ${type}. Only TAG and NUMERIC are supported.`,
@@ -268,7 +287,7 @@ function isVectorAlgorithm(value: string): value is VectorAlgorithms {
  * created, so silently using HNSW could only be undone by clearing the index.
  */
 function readAlgorithm(value: unknown): VectorAlgorithms {
-	const algorithm = nonEmpty(value, VectorAlgorithms.HNSW).toUpperCase();
+	const algorithm = nonEmpty('Vector Algorithm', value, VectorAlgorithms.HNSW).toUpperCase();
 	if (!isVectorAlgorithm(algorithm)) {
 		throw new ValkeyUserError(
 			`Vector Algorithm "${algorithm}" is not supported. Use ${VECTOR_ALGORITHMS.join(', ')}.`,
