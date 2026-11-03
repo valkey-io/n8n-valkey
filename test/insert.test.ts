@@ -82,6 +82,34 @@ describe('validateDocumentMetadata', () => {
 			validateDocumentMetadata(docs(1, { page: 4 }), [{ name: 'page', type: 'TAG' }]),
 		).toThrow('declared TAG but has value 4 (number)');
 	});
+
+	it('accepts a TAG array of strings', () => {
+		expect(() =>
+			validateDocumentMetadata(docs(1, { tags: ['news', 'sport'] }), [
+				{ name: 'tags', type: 'TAG' },
+			]),
+		).not.toThrow();
+	});
+
+	it.each([
+		['an object', ['ok', { a: 1 }], 'element 2 of its array is {"a":1} (object)'],
+		['a nested array', [['a', 'b']], 'element 1 of its array is ["a","b"] (object)'],
+		['a number', ['ok', 7], 'element 2 of its array is 7 (number)'],
+		['a boolean', [true], 'element 1 of its array is true (boolean)'],
+		['null', ['ok', null], 'element 2 of its array is null (object)'],
+	])('rejects a TAG array that contains %s, naming the element', (_label, tags, message) => {
+		const run = () => validateDocumentMetadata(docs(1, { tags }), [{ name: 'tags', type: 'TAG' }]);
+		expect(run).toThrow(`Document 1: metadata field "tags" is declared TAG but ${message}`);
+		expect(run).toThrow('TAG values must be strings or arrays of strings');
+	});
+
+	it('rejects a nested object as a TAG value', () => {
+		expect(() =>
+			validateDocumentMetadata(docs(1, { tags: { primary: 'news' } }), [
+				{ name: 'tags', type: 'TAG' },
+			]),
+		).toThrow('declared TAG but has value {"primary":"news"} (object)');
+	});
 });
 
 describe('insertBatch', () => {

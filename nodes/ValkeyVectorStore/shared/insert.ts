@@ -135,11 +135,23 @@ export function validateDocumentMetadata(documents: Document[], declared: Metada
 					'invalid-metadata',
 				);
 			}
-			if (field.type === 'TAG' && typeof value !== 'string' && !Array.isArray(value)) {
-				throw new ValkeyUserError(
-					`Document ${index + 1}: metadata field "${field.name}" is declared TAG but has value ${describe(value)}. TAG values must be strings or arrays of strings.`,
-					'invalid-metadata',
-				);
+			if (field.type === 'TAG') {
+				if (typeof value === 'string') continue;
+				if (!Array.isArray(value)) {
+					throw new ValkeyUserError(
+						`Document ${index + 1}: metadata field "${field.name}" is declared TAG but has value ${describe(value)}. TAG values must be strings or arrays of strings.`,
+						'invalid-metadata',
+					);
+				}
+				// The library joins array elements with String(), so an object
+				// would be indexed as the tag "[object Object]".
+				const position = value.findIndex((element) => typeof element !== 'string');
+				if (position !== -1) {
+					throw new ValkeyUserError(
+						`Document ${index + 1}: metadata field "${field.name}" is declared TAG but element ${position + 1} of its array is ${describe(value[position])}. TAG values must be strings or arrays of strings.`,
+						'invalid-metadata',
+					);
+				}
 			}
 		}
 	});
