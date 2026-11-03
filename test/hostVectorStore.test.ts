@@ -115,5 +115,22 @@ describe('toHostVectorStore', () => {
 			toHostVectorStore(store, embeddings, host).closeClient();
 			expect(client.close).toHaveBeenCalled();
 		});
+
+		// The bridge implements only the VectorStore methods and closeClient.
+		// Each expect-error directive below fails type-checking if the return type is widened
+		// to the store's own class again.
+		it('exposes only the members its type declares', async () => {
+			const host = secondCopy();
+			const { store, embeddings } = await makeStore();
+			const bridged = toHostVectorStore(store, embeddings, host);
+
+			// @ts-expect-error indexName is not part of ValkeyStoreHandle
+			const indexName: unknown = bridged.indexName;
+			// @ts-expect-error checkIndexExists is not part of ValkeyStoreHandle
+			const checkIndexExists: unknown = bridged.checkIndexExists;
+
+			expect(indexName).toBeUndefined();
+			expect(checkIndexExists).toBeUndefined();
+		});
 	});
 });

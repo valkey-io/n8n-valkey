@@ -31,10 +31,10 @@ import {
 } from './shared/descriptions';
 import { NO_DOCUMENTS_ERROR, ValkeyUserError, messageOf, missingIndexError } from './shared/errors';
 import { toHostVectorStore } from './shared/hostVectorStore';
+import type { ValkeyStoreHandle } from './shared/hostVectorStore';
 import { metadataFields, readIndexInfo } from './shared/indexSchema';
 import { defaultInsertDeps, insertBatch, newInsertState } from './shared/insert';
 import type { InsertState } from './shared/insert';
-import type { N8nValkeyVectorStore } from './shared/filteredStore';
 import { buildRetrieveStore } from './shared/retrieve';
 
 type NodeContext = IExecuteFunctions | ISupplyDataFunctions;
@@ -64,7 +64,7 @@ async function openClient(context: NodeContext | ILoadOptionsFunctions) {
 	return await createValkeyClient(parseCredentials(credentials));
 }
 
-const VectorStoreValkeyBase = createVectorStoreNode<N8nValkeyVectorStore>({
+const VectorStoreValkeyBase = createVectorStoreNode<ValkeyStoreHandle>({
 	meta: {
 		displayName: 'Valkey Vector Store',
 		name: 'vectorStoreValkey',

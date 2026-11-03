@@ -6,6 +6,14 @@ import { VectorStore } from '@langchain/core/vectorstores';
 
 import type { N8nValkeyVectorStore } from './filteredStore';
 
+/**
+ * What toHostVectorStore returns: a VectorStore that can also close its
+ * client. When two @langchain/core copies are installed it is a bridge that
+ * implements only these members, so the store's other members are not part
+ * of the type.
+ */
+export type ValkeyStoreHandle = VectorStore & Pick<N8nValkeyVectorStore, 'closeClient'>;
+
 /** The parts of @langchain/core this module needs from n8n's copy. */
 export interface HostLangChain {
 	VectorStore: typeof VectorStore;
@@ -48,7 +56,7 @@ export function toHostVectorStore(
 	store: N8nValkeyVectorStore,
 	embeddings: EmbeddingsInterface,
 	host: HostLangChain | undefined = loadHostLangChain(),
-): N8nValkeyVectorStore {
+): ValkeyStoreHandle {
 	if (!host || host.VectorStore === VectorStore || store instanceof host.VectorStore) return store;
 	const HostDocument = host.Document;
 
@@ -86,5 +94,5 @@ export function toHostVectorStore(
 		}
 	}
 
-	return new HostValkeyVectorStore(embeddings, {}) as unknown as N8nValkeyVectorStore;
+	return new HostValkeyVectorStore(embeddings, {});
 }
