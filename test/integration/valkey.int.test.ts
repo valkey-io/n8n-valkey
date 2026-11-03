@@ -202,12 +202,7 @@ describeIntegration('Valkey integration', () => {
 		expect(await contents([])).toHaveLength(corpus.length);
 	});
 
-	// TODO: re-enable once @langchain/valkey writes "Is Any Of" as `@f:{a|b}`.
-	// The library currently builds `@f:({a}|{b})`, which
-	// valkey-search rejects ("Index does not have any text field" on 1.2.x,
-	// "Expected '[', '{', got '('" on older versions), so this test fails on
-	// every server until that fix is released and the vendored tarball updated.
-	it.skip('filters on "Is Any Of" TAG values', async () => {
+	it('filters on "Is Any Of" TAG values', async () => {
 		const config = insertConfig('filters-any-of', { declaredFields: declared });
 		await insert(config, corpus);
 		const anyOf = await search(config, 'refund', 10, [
