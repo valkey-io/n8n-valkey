@@ -252,12 +252,13 @@ const RECREATE_HINT =
 /**
  * Throws a ValkeyUserError describing the first incompatibility between an
  * existing index and the node's configuration. Never logs and continues.
+ * Returns the checked vector field, whose metric and dimension are known.
  */
 export function assertCompatible(
 	info: IndexInfo,
 	config: CompatibilityConfig,
 	mode: 'insert' | 'retrieve',
-): void {
+): IndexVectorField {
 	const idx = `Index "${config.indexName}"`;
 
 	if (info.dataType !== 'HASH') {
@@ -285,6 +286,21 @@ export function assertCompatible(
 		const found = info.vectors.map((v) => `"${v.name}"`).join(', ') || 'none';
 		throw new ValkeyUserError(
 			`${idx} has no VECTOR field named "${config.vectorKey}" (vector fields found: ${found}). Set Vector Key to match the index.`,
+			'index-incompatible',
+		);
+	}
+
+	// The metric and dimension checks depend on these values, so an FT.INFO
+	// reply they cannot be read from fails instead of skipping the checks.
+	if (!vector.metric) {
+		throw new ValkeyUserError(
+			`${idx} did not report a distance metric for the VECTOR field "${config.vectorKey}" in a form this node can read, so the index cannot be checked against Distance Metric.`,
+			'index-incompatible',
+		);
+	}
+	if (!Number.isInteger(vector.dim) || vector.dim <= 0) {
+		throw new ValkeyUserError(
+			`${idx} did not report a dimension for the VECTOR field "${config.vectorKey}" in a form this node can read, so the index cannot be checked against the embeddings.`,
 			'index-incompatible',
 		);
 	}
@@ -326,7 +342,7 @@ export function assertCompatible(
 		}
 	}
 
-	if (vector.metric && vector.metric !== config.metric) {
+	if (vector.metric !== config.metric) {
 		throw new ValkeyUserError(
 			`${idx} uses distance metric ${vector.metric}, but the node is configured for ${config.metric}. Set Distance Metric to ${vector.metric}, or recreate the index.`,
 			'index-incompatible',
@@ -355,10 +371,12 @@ export function assertCompatible(
 			}
 		}
 	}
+
+	return vector;
 }
 
 export function assertDimension(indexName: string, indexDim: number, embeddingDim: number): void {
-	if (Number.isFinite(indexDim) && indexDim !== embeddingDim) {
+	if (indexDim !== embeddingDim) {
 		throw new ValkeyUserError(
 			`Index "${indexName}" has vector dimension ${indexDim}, but the connected embeddings produce ${embeddingDim}. Use the embeddings model the index was built with, or recreate the index.`,
 			'dimension-mismatch',

@@ -6,6 +6,7 @@ import {
 } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import type { CompatibilityConfig } from '../nodes/ValkeyVectorStore/shared/indexSchema';
 import { SEARCH_MODULE_MISSING } from '../nodes/ValkeyVectorStore/shared/errors';
+import type { ValkeyUserError } from '../nodes/ValkeyVectorStore/shared/errors';
 import { HASH_INDEX, JSON_INDEX, RECORDED_HASH_INDEX } from './fixtures/ftInfo';
 
 const config: CompatibilityConfig = {
@@ -256,6 +257,83 @@ describe('assertCompatible', () => {
 			);
 		},
 	);
+
+	describe('a vector field whose metric or dimension cannot be read', () => {
+		const indexWithVectorParams = (vectorParams: Record<string, unknown>) =>
+			normalizeIndexInfo({
+				index_name: 'kb',
+				key_type: 'HASH',
+				key_prefixes: ['doc:kb:'],
+				fields: [{ identifier: 'content_vector', type: 'VECTOR', vector_params: vectorParams }],
+			});
+
+		const errorFor = (
+			unreadable: ReturnType<typeof indexWithVectorParams>,
+			mode: 'insert' | 'retrieve',
+		) => {
+			try {
+				assertCompatible(unreadable, { ...config, dimension: 1536 }, mode);
+			} catch (error) {
+				return error as ValkeyUserError;
+			}
+			throw new Error('assertCompatible did not throw');
+		};
+
+		it.each(['insert', 'retrieve'] as const)(
+			'rejects a reply whose vector parameters use unknown keys on %s',
+			(mode) => {
+				const unreadable = normalizeIndexInfo({
+					index_name: 'kb',
+					key_type: 'HASH',
+					key_prefixes: ['doc:kb:'],
+					fields: [
+						{
+							identifier: 'content_vector',
+							type: 'VECTOR',
+							vector_spec: { DIM: 1536, METRIC: 'COSINE' },
+						},
+					],
+				});
+				const error = errorFor(unreadable, mode);
+				expect(error.message).toContain('did not report a distance metric');
+				expect(error.code).toBe('index-incompatible');
+			},
+		);
+
+		it.each(['insert', 'retrieve'] as const)('rejects a missing distance metric on %s', (mode) => {
+			const error = errorFor(indexWithVectorParams({ dimension: 1536, algorithm: 'HNSW' }), mode);
+			expect(error.message).toContain(
+				'did not report a distance metric for the VECTOR field "content_vector"',
+			);
+			expect(error.code).toBe('index-incompatible');
+		});
+
+		it.each([
+			['missing', undefined],
+			['not a number', 'large'],
+			['zero', 0],
+			['not a whole number', 1.5],
+		])('rejects a dimension that is %s', (_label, dimension) => {
+			const error = errorFor(
+				indexWithVectorParams({ distance_metric: 'COSINE', dimension, algorithm: 'HNSW' }),
+				'retrieve',
+			);
+			expect(error.message).toContain(
+				'did not report a dimension for the VECTOR field "content_vector"',
+			);
+			expect(error.code).toBe('index-incompatible');
+		});
+
+		it('rejects a missing dimension even when the embedding dimension is not known', () => {
+			expect(() =>
+				assertCompatible(
+					indexWithVectorParams({ distance_metric: 'COSINE', algorithm: 'HNSW' }),
+					config,
+					'retrieve',
+				),
+			).toThrow('did not report a dimension');
+		});
+	});
 
 	it('rejects a missing declared field on insert', () => {
 		expect(() =>

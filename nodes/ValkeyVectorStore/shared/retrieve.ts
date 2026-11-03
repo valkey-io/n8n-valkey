@@ -29,8 +29,7 @@ export async function buildRetrieveStore(
 		const info = await readInfo(client, config.indexName);
 		if (!info) throw missingIndexError(config.indexName);
 
-		assertCompatible(info, toCompatibilityConfig(config), 'retrieve');
-		const vector = info.vectors.find((v) => v.name === config.vectorKey);
+		const vector = assertCompatible(info, toCompatibilityConfig(config), 'retrieve');
 		const fields = metadataFields(info, config.metadataKey);
 		const metadataFilter = buildMetadataFilter(rows, fields, config.indexName);
 
