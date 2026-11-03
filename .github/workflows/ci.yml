@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Cancel in-progress runs for the same branch/PR to avoid wasting CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Run lint
+        run: 'npm run lint'
+
+      - name: Check formatting
+        run: 'npm run format:check'
+
+      - name: Run build
+        run: 'npm run build'
+
+  unit-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Run unit tests
+        # One process: parallel ts-jest workers are OOM-killed in small act/Podman VMs.
+        run: 'npm run test:unit -- --runInBand'
+
+  integration-test:
+    runs-on: ubuntu-latest
+
+    services:
+      valkey:
+        # valkey-bundle ships valkey-server with valkey-search loaded (FT.* commands)
+        # and valkey-cli for the health check. Same image as langchainjs-valkey CI.
+        image: valkey/valkey-bundle:8.1.10
+        # The image's entrypoint appends VALKEY_EXTRA_FLAGS to valkey-server.
+        # A password lets the wrong-password integration test run.
+        env:
+          VALKEY_EXTRA_FLAGS: --requirepass ci-test-password
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli -a ci-test-password --no-auth-warning ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Run integration tests
+        run: 'npm run test:int -- --runInBand'
+        env:
+          VALKEY_HOST: localhost
+          VALKEY_PORT: 6379
+          VALKEY_PASSWORD: ci-test-password
