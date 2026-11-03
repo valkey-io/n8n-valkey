@@ -163,6 +163,35 @@ describe('buildMetadataFilter', () => {
 		);
 	});
 
+	it.each([
+		['an object for "is"', 'is', { id: 'acme' }, 'got {"id":"acme"} (object)'],
+		['an object in a list', 'isAnyOf', [{ id: 'acme' }], 'got {"id":"acme"} (object)'],
+		['a nested list', 'isAnyOf', [['acme']], 'got ["acme"] (list)'],
+		['undefined in a list', 'isAnyOf', ['acme', undefined], 'got undefined'],
+		['null in a list', 'isAnyOf', ['acme', null], 'got null'],
+	])(
+		'rejects %s as a TAG value instead of converting it to text',
+		(_label, operator, value, got) => {
+			const run = () => build([{ field: 'tenant', operator, value }]);
+			expect(run).toThrow(
+				`Metadata Filter condition 1 ("tenant"): TAG values must be text or a list of text, ${got}.`,
+			);
+		},
+	);
+
+	it.each([
+		['a number', 42, '42'],
+		['a boolean', true, 'true'],
+	])('accepts %s as a TAG value', (_label, value, text) => {
+		expect(build([{ field: 'tenant', operator: 'is', value }])).toEqual({ tenant: text });
+	});
+
+	it('rejects a null TAG value as empty', () => {
+		expect(() => build([{ field: 'tenant', operator: 'is', value: null }])).toThrow(
+			'the value is empty',
+		);
+	});
+
 	it('rejects two TAG conditions on one field', () => {
 		expect(() =>
 			build([
