@@ -86,7 +86,7 @@ const ttlOption: INodeProperties = {
 	displayName: 'TTL (Seconds)',
 	name: 'ttl',
 	type: 'number',
-	typeOptions: { minValue: 0 },
+	typeOptions: { minValue: 0, numberPrecision: 0 },
 	default: 0,
 };
 
@@ -171,7 +171,7 @@ const metadataFilterField: INodeProperties = {
 	placeholder: 'Add Condition',
 	default: {},
 	description:
-		'Only return documents matching all conditions. Fields come from the index; declare them with "Metadata Fields to Index" when inserting.',
+		"Only return documents matching all conditions. Fields come from the index; declare them with 'Metadata Fields to Index' when inserting.",
 	options: [
 		{
 			displayName: 'Condition',
@@ -228,6 +228,7 @@ const metadataFilterField: INodeProperties = {
 					name: 'valueTo',
 					type: 'string',
 					default: '',
+					description: "For 'between', the upper bound",
 					displayOptions: { show: { operator: ['between'] } },
 				},
 				{
@@ -276,7 +277,7 @@ export const updateFields: INodeProperties[] = [
 		default: '={{ $json.text }}',
 		required: true,
 		description:
-			"Text of the updated document. It is embedded and replaces the document's content. Other fields of the input item are not stored unless you add them under Options > Metadata.",
+			"Text of the updated document. It is embedded and replaces the document's content. Other fields of the input item are not stored unless you add them under 'Options > Metadata'.",
 	},
 	{
 		// Not "updateOptions": the n8n lint rule requires a collection whose name
