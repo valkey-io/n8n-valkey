@@ -221,8 +221,12 @@ jobs:
               const client = await GlideClusterClient.createClient({
                 addresses: [{ host: '127.0.0.1', port: Number(process.env.CLUSTER_BASE_PORT) }],
               });
-              const info = String(await client.info());
-              console.log(info.match(/valkey_version:\S+/)[0]);
+              // A cluster client returns a per-node record of INFO replies, not
+              // a single string; join them so the version regex works.
+              const raw = await client.info();
+              const info = typeof raw === 'string' ? raw : Object.values(raw).join('\n');
+              const version = info.match(/valkey_version:\S+/);
+              console.log(version ? version[0] : 'valkey_version: unknown');
               console.log(JSON.stringify(await client.customCommand(['MODULE', 'LIST'])));
               client.close();
             })();
