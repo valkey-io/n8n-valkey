@@ -2,8 +2,8 @@ import { Document } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import { ValkeyVectorStore } from '@langchain/valkey';
 import type { ValkeyAddOptions, ValkeyVectorStoreConfig } from '@langchain/valkey';
-import type { GlideClient } from '@valkey/valkey-glide';
 
+import type { ValkeyClient } from './client';
 import { ValkeyUserError, missingIndexError } from './errors';
 import type { MetadataFilter } from './filters';
 import { assertDimension } from './indexSchema';
@@ -27,7 +27,7 @@ export interface N8nValkeyVectorStoreOptions {
 	/** ID Metadata Field: in Update mode, kept equal to the document's ID. */
 	idField?: string;
 	/** Client owned by this store; closed by closeClient(). */
-	client: GlideClient;
+	client: ValkeyClient;
 }
 
 /**

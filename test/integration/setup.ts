@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import { GlideClient } from '@valkey/valkey-glide';
-
 import { createValkeyClient } from '../../nodes/ValkeyVectorStore/shared/client';
+import type { ValkeyClient } from '../../nodes/ValkeyVectorStore/shared/client';
 import type { ValkeyCredentials } from '../../nodes/ValkeyVectorStore/shared/config';
 import { clearIndex } from '../../nodes/ValkeyVectorStore/shared/clearIndex';
 
@@ -23,6 +22,7 @@ export function testCredentials(): ValkeyCredentials {
 		password: process.env.VALKEY_PASSWORD || undefined,
 		tls: process.env.VALKEY_TLS === 'true' || process.env.VALKEY_TLS === '1',
 		database: Number(process.env.VALKEY_DATABASE ?? 0),
+		cluster: process.env.VALKEY_CLUSTER === 'true' || process.env.VALKEY_CLUSTER === '1',
 	};
 }
 
@@ -46,7 +46,7 @@ export function trackIndex(indexName: string): void {
 	createdIndexes.add(indexName);
 }
 
-export async function connect(): Promise<GlideClient> {
+export async function connect(): Promise<ValkeyClient> {
 	return await createValkeyClient(testCredentials());
 }
 

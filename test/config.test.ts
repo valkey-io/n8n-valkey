@@ -324,6 +324,7 @@ describe('parseCredentials', () => {
 			password: undefined,
 			tls: true,
 			database: 0,
+			cluster: false,
 		});
 	});
 
@@ -337,6 +338,16 @@ describe('parseCredentials', () => {
 		['', true],
 	])('reads SSL/TLS %j as %p', (tls, expected) => {
 		expect(parseCredentials({ host: 'h', tls }).tls).toBe(expected);
+	});
+
+	it.each([
+		[true, true],
+		[false, false],
+		['true', true],
+		['false', false],
+		['', false],
+	])('reads Cluster Mode %j as %p', (cluster, expected) => {
+		expect(parseCredentials({ host: 'h', cluster }).cluster).toBe(expected);
 	});
 
 	it.each([

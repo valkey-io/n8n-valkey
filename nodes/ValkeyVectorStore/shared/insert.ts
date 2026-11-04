@@ -1,8 +1,8 @@
 import { Document } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import { ValkeyVectorStore as LangchainValkeyVectorStore } from '@langchain/valkey';
-import type { GlideClient } from '@valkey/valkey-glide';
 
+import type { ValkeyClient } from './client';
 import { clearIndex } from './clearIndex';
 import type { InsertConfig } from './config';
 import { toCompatibilityConfig, toLibraryConfig, validateMetadataKey } from './config';
@@ -26,15 +26,15 @@ export function newInsertState(): InsertState {
 }
 
 export interface InsertDeps {
-	openClient: () => Promise<GlideClient>;
-	readInfo: (client: GlideClient, indexName: string) => Promise<IndexInfo | null>;
-	clear: (client: GlideClient, indexName: string, keyPrefixes: string[]) => Promise<number>;
+	openClient: () => Promise<ValkeyClient>;
+	readInfo: (client: ValkeyClient, indexName: string) => Promise<IndexInfo | null>;
+	clear: (client: ValkeyClient, indexName: string, keyPrefixes: string[]) => Promise<number>;
 	/**
 	 * `fields` are the metadata fields to write as separate hash fields: those
 	 * of the existing index, or the declared fields when the index is created.
 	 */
 	addVectors: (
-		client: GlideClient,
+		client: ValkeyClient,
 		config: InsertConfig,
 		embeddings: EmbeddingsInterface,
 		vectors: number[][],
@@ -44,7 +44,7 @@ export interface InsertDeps {
 	) => Promise<void>;
 }
 
-export const defaultInsertDeps = (openClient: () => Promise<GlideClient>): InsertDeps => ({
+export const defaultInsertDeps = (openClient: () => Promise<ValkeyClient>): InsertDeps => ({
 	openClient,
 	readInfo: async (client, indexName) => await readIndexInfo(client, indexName),
 	clear: async (client, indexName, keyPrefixes) => await clearIndex(client, indexName, keyPrefixes),
@@ -225,7 +225,7 @@ export async function insertBatch(
 	// batches of this execution already did.
 	let writing = false;
 	// Set once connected, so the finally block closes only a client that was opened.
-	let openedClient: GlideClient | undefined;
+	let openedClient: ValkeyClient | undefined;
 	try {
 		validateDocumentMetadata(documents, config.declaredFields);
 		const ids = config.idField ? batchIds(documents, config, state) : undefined;

@@ -1,6 +1,6 @@
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
-import type { GlideClient } from '@valkey/valkey-glide';
 
+import type { ValkeyClient } from './client';
 import type { StoreConfig } from './config';
 import { toCompatibilityConfig, toLibraryConfig } from './config';
 import { missingIndexError } from './errors';
@@ -19,11 +19,11 @@ import { N8nValkeyVectorStore } from './filteredStore';
  * store.closeClient() otherwise.
  */
 export async function buildRetrieveStore(
-	client: GlideClient,
+	client: ValkeyClient,
 	config: StoreConfig & { ttl?: number; updateMode?: boolean },
 	embeddings: EmbeddingsInterface,
 	rows: FilterConditionRow[],
-	readInfo: (client: GlideClient, indexName: string) => Promise<IndexInfo | null> = readIndexInfo,
+	readInfo: (client: ValkeyClient, indexName: string) => Promise<IndexInfo | null> = readIndexInfo,
 ): Promise<N8nValkeyVectorStore> {
 	try {
 		const info = await readInfo(client, config.indexName);

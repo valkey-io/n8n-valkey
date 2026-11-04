@@ -1,7 +1,10 @@
 import { GlideFt } from '@valkey/valkey-glide';
-import type { FtInfoReturnType, GlideClient } from '@valkey/valkey-glide';
+import type { FtInfoReturnType, GlideClient, GlideClusterClient } from '@valkey/valkey-glide';
 
 import { SEARCH_MODULE_MISSING, ValkeyUserError, classifyFtError } from './errors';
+
+/** A connected client of either topology. */
+type ValkeyClient = GlideClient | GlideClusterClient;
 
 export const DISTANCE_METRICS = ['COSINE', 'L2', 'IP'] as const;
 export type DistanceMetric = (typeof DISTANCE_METRICS)[number];
@@ -206,7 +209,7 @@ export function metadataFields(info: IndexInfo, metadataKey: string): MetadataFi
 	return result;
 }
 
-export type FtInfoFn = (client: GlideClient, indexName: string) => Promise<FtInfoReturnType>;
+export type FtInfoFn = (client: ValkeyClient, indexName: string) => Promise<FtInfoReturnType>;
 
 const defaultFtInfo: FtInfoFn = async (client, indexName) => await GlideFt.info(client, indexName);
 
@@ -219,7 +222,7 @@ const defaultFtInfo: FtInfoFn = async (client, indexName) => await GlideFt.info(
  * missing index.
  */
 export async function readIndexInfo(
-	client: GlideClient,
+	client: ValkeyClient,
 	indexName: string,
 	ftInfo: FtInfoFn = defaultFtInfo,
 ): Promise<IndexInfo | null> {

@@ -6,7 +6,10 @@ import {
 	isClusterEnabled,
 } from '../nodes/ValkeyVectorStore/shared/client';
 import { parseCredentials } from '../nodes/ValkeyVectorStore/shared/config';
-import { CLUSTER_MODE_ERROR } from '../nodes/ValkeyVectorStore/shared/errors';
+import {
+	CLUSTER_MODE_ERROR,
+	STANDALONE_MODE_ERROR,
+} from '../nodes/ValkeyVectorStore/shared/errors';
 
 function fakeClient(infoReply: string | Error) {
 	return {
@@ -61,7 +64,14 @@ describe('connectGlide', () => {
 
 	it('sends no credentials for an empty password string', async () => {
 		// parseCredentials turns '' into undefined; connectGlide must not rely on it.
-		await connectGlide({ host: 'localhost', port: 6379, tls: false, database: 0, password: '' });
+		await connectGlide({
+			host: 'localhost',
+			port: 6379,
+			tls: false,
+			database: 0,
+			password: '',
+			cluster: false,
+		});
 		expect(createClient).toHaveBeenCalledWith(expect.objectContaining({ credentials: undefined }));
 	});
 });
@@ -90,5 +100,37 @@ describe('createValkeyClient', () => {
 			'NOAUTH',
 		);
 		expect(client.close).toHaveBeenCalled();
+	});
+
+	it('returns a cluster client when the credential is in cluster mode', async () => {
+		const clusterCreds = parseCredentials({ host: 'h', cluster: true });
+		const client = fakeClient('cluster_enabled:1\r\n');
+		const result = await createValkeyClient(clusterCreds, async () => client as never);
+		expect(result).toBe(client);
+		expect(client.close).not.toHaveBeenCalled();
+	});
+
+	it('rejects a cluster credential against a standalone server and closes the client', async () => {
+		const clusterCreds = parseCredentials({ host: 'h', cluster: true });
+		const client = fakeClient('cluster_enabled:0\r\n');
+		await expect(createValkeyClient(clusterCreds, async () => client as never)).rejects.toThrow(
+			STANDALONE_MODE_ERROR,
+		);
+		expect(client.close).toHaveBeenCalled();
+	});
+
+	it('reads cluster mode from a per-node INFO record', async () => {
+		const clusterCreds = parseCredentials({ host: 'h', cluster: true });
+		// A cluster client returns INFO as a per-node record, not a string.
+		const client = {
+			info: jest.fn(async () => ({
+				'10.0.0.1:6379': '# Cluster\r\ncluster_enabled:1\r\n',
+				'10.0.0.2:6379': '# Cluster\r\ncluster_enabled:1\r\n',
+			})),
+			close: jest.fn(),
+		};
+		const result = await createValkeyClient(clusterCreds, async () => client as never);
+		expect(result).toBe(client);
+		expect(client.close).not.toHaveBeenCalled();
 	});
 });

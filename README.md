@@ -13,7 +13,7 @@ n8n's Redis Vector Store node does not work with Valkey because it creates `TEXT
 - [Document IDs and Update](#document-ids-and-update)
 - [Errors](#errors)
 - [Setup: self-hosted Valkey](#setup-self-hosted-valkey)
-- [Setup: AWS ElastiCache for Valkey](#setup-aws-elasticache-for-valkey)
+- [Setup: managed/hosted Valkey](#setup-managedhosted-valkey)
 - [Troubleshooting](#troubleshooting)
 
 ## Installation
@@ -24,8 +24,8 @@ The package depends on `@valkey/valkey-glide`, which ships a native binary. Preb
 
 ## Requirements and limitations
 
-- Valkey 8.2 or later with the ValkeySearch module, for example the `valkey/valkey-bundle` image or ElastiCache for Valkey.
-- **Standalone only.** Cluster-mode servers, including ElastiCache with cluster mode enabled, are rejected with an error.
+- Valkey 8.2 or later with the ValkeySearch module, for example the `valkey/valkey-bundle` image.
+- **Standalone and cluster mode.** Enable **Cluster Mode** in the credential to connect to a cluster-mode server.
 - **HASH storage only.** Each document is a Valkey hash. Indexes created `ON JSON` are rejected.
 - **No TEXT fields and no full-text search.** Only the vector is indexed by default; metadata can be indexed as TAG or NUMERIC.
 
@@ -39,7 +39,7 @@ Create a **Valkey API** credential:
 | Port | 6379 | |
 | Username | | ACL user. Empty uses the default user. |
 | Password | | Stored as a secret |
-| SSL/TLS | off | Required for ElastiCache with in-transit encryption |
+| SSL/TLS | off | Required when the server has in-transit encryption enabled |
 | Database Number | 0 | |
 
 **Test connection** connects with these settings, runs `PING`, and shows the server's error if it fails. It times out after a few seconds rather than hanging, for example when the server needs TLS and TLS is off.
@@ -60,7 +60,7 @@ These **Index Options** must be the same in every node that uses an index:
 
 | Option | Default | Description |
 |---|---|---|
-| Key Prefix | `doc:<index name>:` | Keys the documents are stored under. The index covers this prefix. |
+| Key Prefix | `doc:<index name>:` | Keys the documents are stored under. The index covers this prefix. When the index name contains `:`, a Key Prefix is required, because the default prefix could otherwise overlap the prefix of another index. |
 | Content Key | `content` | Hash field holding the document text |
 | Metadata Key | `metadata` | Hash field holding the metadata as JSON |
 | Vector Key | `content_vector` | Hash field holding the embedding |
@@ -89,23 +89,25 @@ The index schema is fixed when the index is created. To change it (another embed
 
 Every document's metadata is stored and returned with results. To **filter** on a field, declare it in **Metadata Fields to Index** on the Insert node before the index is created:
 
-- **TAG**: exact match on strings or arrays of strings, for example `source`, `tenant`.
+- **TAG**: exact match on strings or arrays of strings, for example `source`, `tenant`. Every element of an array must be a string; an insert whose TAG value is a number, a boolean, an object, or an array containing any of these fails.
 - **NUMERIC**: number ranges, for example `year`, `page`.
 
-Only top-level metadata keys can be indexed.
+Only top-level metadata keys can be indexed. To filter on a nested value, copy it to a top-level key before inserting, for example `tenant` set to `{{ $json.customer.tenant }}` in the Default Data Loader's metadata.
 
 When inserting into an existing index, the node writes every TAG and NUMERIC field defined by that index, regardless of the fields listed in **Metadata Fields to Index**. Documents added later therefore remain filterable on all indexed fields. Each field listed in **Metadata Fields to Index** must exist in the index with the same type; otherwise, the insert fails.
 
-In the retrieve modes, **Metadata Filter** lists the index's TAG and NUMERIC fields. Conditions are combined with AND:
+In the retrieve modes, **Metadata Filter** lists the index's TAG and NUMERIC fields. Each condition has one **Operator** list containing every operator; each operator applies to one field type:
 
 | Field type | Operators |
 |---|---|
-| TAG | is, is any of (comma-separated values) |
-| NUMERIC | equals, greater than or equal, less than or equal, between (inclusive) |
+| TAG | Is, Is Any Of (comma-separated values) |
+| NUMERIC | Equals, Greater Than or Equal, Less Than or Equal, Between (inclusive) |
 
-Values accept expressions, for example `{{ $json.customerId }}`. In **Retrieve as Tool** mode the filter comes only from the node configuration; the agent cannot change it, which makes it suitable for tenant isolation.
+Conditions are combined with AND. Values accept expressions, for example `{{ $json.customerId }}`. In **Retrieve as Tool** mode the filter comes only from the node configuration; the agent cannot change it, which makes it suitable for tenant isolation.
 
-If you set **Field** with an expression, return the field name (`source`) or the dropdown's value form (`source|TAG`). The field and operator are always checked against the index when the node runs.
+A TAG filter value cannot contain the field's separator, which is `,` unless the index defines another. Valkey stores such a value as several tags, so the value cannot match; the node stops with an error instead. To match any of several tags, use **Is Any Of**.
+
+**Field** also accepts an expression that returns a field name, for example `{{ $json.field }}`. When the node runs, it checks each condition against the index: the field must be indexed, and the operator must belong to the field's type. A condition whose operator does not match, such as Is on a NUMERIC field, stops the run with an error that lists the valid operators.
 
 ## Document IDs and Update
 
@@ -154,19 +156,18 @@ If n8n runs in Docker too, put both containers on one network and use the Valkey
 
 In n8n, create a Valkey API credential with host `localhost`, port `6379`, then build a workflow: **Default Data Loader** + an **Embeddings** node → **Valkey Vector Store** (Insert Documents).
 
-## Setup: AWS ElastiCache for Valkey
+## Setup: managed/hosted Valkey
 
-1. Create an ElastiCache for Valkey cache (8.2 or later) with **cluster mode disabled**. Serverless caches and cluster-mode-enabled clusters are not supported.
-2. Enable **in-transit encryption** and set up authentication (an ElastiCache RBAC user or AUTH token).
-3. Run n8n in the same VPC (or a peered network), and allow inbound TCP 6379 from n8n in the cache's security group. ElastiCache is not reachable from the internet.
-4. Create a Valkey API credential: host = the cache's **primary endpoint**, port `6379`, SSL/TLS **on**, and the username and password from step 2.
+1. Provision a managed Valkey server (8.2 or later) with the ValkeySearch module available. Both standalone and cluster-mode servers are supported; enable **Cluster Mode** in the credential for a cluster-mode server.
+2. Enable **in-transit encryption** and set up authentication (an ACL/RBAC user or AUTH token).
+3. Run n8n in a network that can reach the server, and allow inbound TCP 6379 from n8n in the server's security group or firewall. Managed caches are typically not reachable from the internet.
+4. Create a Valkey API credential: host = the server's endpoint (for a cluster, any node or the configuration endpoint), port `6379`, SSL/TLS **on**, and the username and password from step 2.
 
 ## Troubleshooting
 
 | Error | Cause |
 |---|---|
-| `The ValkeySearch module is not available on this server` | The server runs Valkey without ValkeySearch, for example the plain `valkey/valkey` image. Use `valkey/valkey-bundle` or ElastiCache for Valkey 8.2+. |
-| `Cluster mode is not supported` | The server has cluster mode enabled. Use a standalone server. |
+| `The ValkeySearch module is not available on this server` | The server runs Valkey without ValkeySearch, for example the plain `valkey/valkey` image. Use `valkey/valkey-bundle` or another Valkey 8.2+ server with ValkeySearch loaded. |
 | `Index "…" has vector dimension X, but the connected embeddings produce Y` | The Embeddings model differs from the one the index was built with. |
 | Connection test times out | Check the host, port, security groups, and whether the server requires TLS. |
 

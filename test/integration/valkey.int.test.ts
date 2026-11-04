@@ -1,10 +1,11 @@
 import { Document } from '@langchain/core/documents';
 import { N8nJsonLoader } from '@n8n/ai-utilities';
 import { VectorAlgorithms } from '@langchain/valkey';
-import { GlideFt } from '@valkey/valkey-glide';
+import { ClusterScanCursor, GlideClusterClient, GlideFt } from '@valkey/valkey-glide';
 import type { GlideClient } from '@valkey/valkey-glide';
 
 import { createValkeyClient } from '../../nodes/ValkeyVectorStore/shared/client';
+import type { ValkeyClient } from '../../nodes/ValkeyVectorStore/shared/client';
 import { clearIndex } from '../../nodes/ValkeyVectorStore/shared/clearIndex';
 import type { InsertConfig } from '../../nodes/ValkeyVectorStore/shared/config';
 import { metadataFields, readIndexInfo } from '../../nodes/ValkeyVectorStore/shared/indexSchema';
@@ -74,15 +75,31 @@ async function search(
 	}
 }
 
-async function countKeys(client: GlideClient, prefix: string): Promise<number> {
-	let cursor = '0';
-	let count = 0;
+/** Returns every key matching `${prefix}*`, scanning across all primaries in cluster mode. */
+async function scanKeys(client: ValkeyClient, prefix: string): Promise<string[]> {
+	const match = `${prefix}*`;
+	const found: string[] = [];
+	// Cluster and standalone scans use different cursors: the cluster client
+	// takes a ClusterScanCursor object, the standalone client a string cursor.
+	const isCluster = client instanceof GlideClusterClient;
+	let cursor: ClusterScanCursor | string = isCluster ? new ClusterScanCursor() : '0';
+	const done = () => (isCluster ? (cursor as ClusterScanCursor).isFinished() : cursor === '0');
+
 	do {
-		const [next, keys] = await client.scan(cursor, { match: `${prefix}*`, count: 1000 });
-		cursor = String(next);
-		count += keys.length;
-	} while (cursor !== '0');
-	return count;
+		const [next, keys] = isCluster
+			? await (client as GlideClusterClient).scan(cursor as ClusterScanCursor, {
+					match,
+					count: 1000,
+				})
+			: await (client as GlideClient).scan(cursor as string, { match, count: 1000 });
+		cursor = isCluster ? (next as ClusterScanCursor) : String(next);
+		found.push(...(keys as string[]).map(String));
+	} while (!done());
+	return found;
+}
+
+async function countKeys(client: ValkeyClient, prefix: string): Promise<number> {
+	return (await scanKeys(client, prefix)).length;
 }
 
 const corpus = [
@@ -115,7 +132,9 @@ const declared: InsertConfig['declaredFields'] = [
 ];
 
 describeIntegration('Valkey integration', () => {
-	let client: GlideClient;
+	// The client is standalone or cluster depending on VALKEY_CLUSTER; countKeys
+	// handles both cursor protocols.
+	let client: ValkeyClient;
 
 	beforeAll(async () => {
 		client = await connect();
@@ -621,7 +640,7 @@ describeIntegration('Valkey integration', () => {
 	it('sets the TTL on inserted keys', async () => {
 		const config = insertConfig('ttl', { ttl: 3600 });
 		await insert(config, corpus.slice(0, 1));
-		const [, keys] = await client.scan('0', { match: `${config.keyPrefix}*`, count: 1000 });
+		const keys = await scanKeys(client, config.keyPrefix);
 		const ttl = await client.ttl(keys[0]);
 		expect(ttl).toBeGreaterThan(3500);
 		expect(ttl).toBeLessThanOrEqual(3600);
@@ -694,7 +713,7 @@ describeIntegration('Valkey integration', () => {
 		it('Update without the option works with a random ID', async () => {
 			const config = insertConfig('update-uuid');
 			await insert(config, [new Document({ pageContent: 'Old', metadata: {} })]);
-			const [, [key]] = await client.scan('0', { match: `${config.keyPrefix}*`, count: 1000 });
+			const [key] = await scanKeys(client, config.keyPrefix);
 			const id = String(key).slice(config.keyPrefix.length);
 
 			await update(config, new Document({ pageContent: 'New', metadata: {} }), id);
@@ -785,7 +804,7 @@ describeIntegration('Valkey integration', () => {
 	it('uses custom content and vector keys', async () => {
 		const config = insertConfig('keys', { contentKey: 'text', vectorKey: 'embedding' });
 		await insert(config, corpus.slice(0, 1));
-		const [, keys] = await client.scan('0', { match: `${config.keyPrefix}*`, count: 1000 });
+		const keys = await scanKeys(client, config.keyPrefix);
 		const fields = (await client.hkeys(keys[0])).map(String).sort();
 		expect(fields).toEqual(expect.arrayContaining(['embedding', 'metadata', 'text']));
 	});

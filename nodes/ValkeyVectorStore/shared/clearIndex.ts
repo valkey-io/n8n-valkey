@@ -1,4 +1,4 @@
-import { GlideFt } from '@valkey/valkey-glide';
+import { ClusterScanCursor, GlideClusterClient, GlideFt } from '@valkey/valkey-glide';
 import type { GlideClient } from '@valkey/valkey-glide';
 
 import { SEARCH_MODULE_MISSING, ValkeyUserError, classifyFtError, messageOf } from './errors';
@@ -10,13 +10,18 @@ export function escapeGlob(value: string): string {
 
 export const SCAN_COUNT = 1000;
 
-/** The subset of GlideClient used here, so tests can pass a fake. */
-export type ClearIndexClient = Pick<GlideClient, 'scan' | 'unlink'>;
+/**
+ * The subset of a connected client used here, so tests can pass a fake. Both
+ * topologies expose `scan` and `unlink`, but the cluster `scan` takes a
+ * `ClusterScanCursor` object instead of a string cursor, so the two are kept
+ * distinct and dispatched on the concrete client type.
+ */
+export type ClearIndexClient = Pick<GlideClient | GlideClusterClient, 'scan' | 'unlink'>;
 
 export type DropIndexFn = (client: ClearIndexClient, indexName: string) => Promise<unknown>;
 
 const defaultDropIndex: DropIndexFn = async (client, indexName) =>
-	await GlideFt.dropindex(client as GlideClient, indexName);
+	await GlideFt.dropindex(client as GlideClient | GlideClusterClient, indexName);
 
 /** Running count of confirmed deletions; a lost response can leave more keys deleted. */
 interface DeleteProgress {
@@ -29,12 +34,30 @@ async function scanAndUnlink(
 	progress: DeleteProgress,
 ): Promise<void> {
 	const match = `${escapeGlob(prefix)}*`;
-	let cursor = '0';
+	// Standalone and cluster scans share the SCAN + UNLINK loop but use
+	// different cursors: standalone takes a string cursor (start '0', done at
+	// '0'), cluster takes an opaque ClusterScanCursor that walks every primary.
+	// Only the cursor init, the scan call and the done check differ, so those
+	// are the only things dispatched on the concrete client type.
+	const isCluster = client instanceof GlideClusterClient;
+	let cursor: ClusterScanCursor | string = isCluster ? new ClusterScanCursor() : '0';
+	const done = () => (isCluster ? (cursor as ClusterScanCursor).isFinished() : cursor === '0');
+
 	do {
-		const [next, keys] = await client.scan(cursor, { match, count: SCAN_COUNT });
-		cursor = String(next);
-		if (keys.length > 0) progress.deleted += await client.unlink(keys);
-	} while (cursor !== '0');
+		// The string- and object-cursor overloads can't be unified into one call
+		// signature, so the scan call itself stays branched.
+		const [next, keys] = isCluster
+			? await (client as GlideClusterClient).scan(cursor as ClusterScanCursor, {
+					match,
+					count: SCAN_COUNT,
+				})
+			: await (client as Pick<GlideClient, 'scan' | 'unlink'>).scan(cursor as string, {
+					match,
+					count: SCAN_COUNT,
+				});
+		cursor = isCluster ? (next as ClusterScanCursor) : String(next);
+		if (keys.length > 0) progress.deleted += await client.unlink(keys as string[]);
+	} while (!done());
 }
 
 /** The server's message without trailing punctuation, so it can sit inside a sentence. */

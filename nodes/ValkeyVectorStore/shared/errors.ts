@@ -30,10 +30,13 @@ export class ValkeyUserError extends Error {
 }
 
 export const SEARCH_MODULE_MISSING =
-	'The ValkeySearch module is not available on this server. Use Valkey 8.2+ with ValkeySearch loaded, for example the valkey/valkey-bundle image or ElastiCache for Valkey.';
+	'The ValkeySearch module is not available on this server. Use Valkey 8.2+ with ValkeySearch loaded, for example the valkey/valkey-bundle image.';
 
 export const CLUSTER_MODE_ERROR =
-	'Cluster mode is not supported. This node only supports standalone Valkey (ElastiCache cluster mode disabled).';
+	'The server has cluster mode enabled, but the credential is set to standalone. Enable Cluster Mode in the Valkey credential.';
+
+export const STANDALONE_MODE_ERROR =
+	'The credential has Cluster Mode enabled, but the server is a standalone (non-cluster) Valkey. Disable Cluster Mode in the Valkey credential.';
 
 export const NO_DOCUMENTS_ERROR =
 	'No documents to insert: the connected Document Loader produced no documents.';

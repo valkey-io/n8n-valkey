@@ -18,6 +18,8 @@ export interface ValkeyCredentials {
 	password?: string;
 	tls: boolean;
 	database: number;
+	/** Connect with a cluster client (Valkey cluster mode enabled). */
+	cluster: boolean;
 }
 
 export interface StoreConfig {
@@ -149,6 +151,14 @@ export function parseCredentials(data: ICredentialDataDecryptedObject): ValkeyCr
 			min: 0,
 			code: 'invalid-credential',
 		}),
+		// Cluster mode uses a cluster client; Database Number is ignored, since
+		// a Valkey cluster has no logical databases.
+		cluster: booleanFlag(
+			"The Valkey credential's Cluster Mode",
+			data.cluster,
+			false,
+			'invalid-credential',
+		),
 	};
 }
 
