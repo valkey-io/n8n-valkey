@@ -12,9 +12,6 @@ The current list of committers is:
 
 | Committer        | Company   | GitHub ID          |
 | ---------------- | --------- | ------------------ |
-| Matthias Howell  | Improving | MatthiasHowellYopp |
-| Jonathan Neufeld | Improving | Jonathan-Improving |
-| Edward Liang     | Improving | edlng              |
-| Riley Desserre   | Improving | rileydes-improving |
+| Victor Tsang     | Improving | vic-tsang          |
 
 Valkey Vector Store for n8n is actively looking for more maintainers and committers -- people who make significant and sustained contributions to the repository will be considered.

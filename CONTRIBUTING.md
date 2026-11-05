@@ -13,17 +13,13 @@ See the [README](README.md) for this repository's audience and purpose. Contribu
 3. **Set up a local environment.** You need a running Valkey instance with Valkey Search, for example:
 
    ```bash
-   docker run -d --name valkey -p 6379:6379 valkey/valkey-bundle
+   docker run -d --name valkey -p 6379:6379 valkey/valkey-bundle:9.1.4
    ```
 
    <!-- TODO: add install, build, test, and lint commands, plus how to load the node into a local n8n instance. -->
 
 4. **Make your change**, add or update tests, and sign off every commit (see [DCO](#developer-certificate-of-origin-dco)).
 5. **Open a pull request** following the [pull request guidelines](#pull-request-guidelines).
-
-## Code of Conduct
-
-This project follows the [Contributor Covenant v2.0](https://www.contributor-covenant.org/version/2/0/code_of_conduct/). By participating you agree to abide by its terms.
 
 ## License
 
@@ -61,13 +57,23 @@ The default setup path must work with self-hosted Valkey with Valkey Search (`va
 
 ## Commit messages
 
-Conventional commit format is recommended but not enforced:
+Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```text
+<type>(<optional scope>): <description>
+```
+
+The allowed types are `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci`,
+`style`, and `chore`. For example:
 
 ```text
 feat(credentials): add TLS option
 fix(insert): handle empty metadata
 docs: update installation section
 ```
+
+Pull requests with non-conforming commit messages will fail CI. The enforcement details (a
+Husky `commit-msg` hook and the CI check) will be added in #3.
 
 Always sign off: `git commit -s`.
 
