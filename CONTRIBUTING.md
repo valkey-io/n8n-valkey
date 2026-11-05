@@ -16,10 +16,56 @@ See the [README](README.md) for this repository's audience and purpose. Contribu
    docker run -d --name valkey -p 6379:6379 valkey/valkey-bundle:9.1.4
    ```
 
-   <!-- TODO: add install, build, test, and lint commands, plus how to load the node into a local n8n instance. -->
+   Install dependencies and build the node:
+
+   ```bash
+   npm install
+   npm run build
+   ```
+
+   `npm install` runs the `prepare` script, which installs the Git hooks (see
+   [Git hooks](#git-hooks)).
+
+   Run the checks:
+
+   ```bash
+   npm run lint          # ESLint via the n8n node CLI
+   npm run format:check  # Prettier
+   npm run test:unit     # unit tests
+   npm run test:int      # integration tests (needs the Valkey instance above)
+   ```
+
+   The integration tests connect to `localhost:6379` by default. Set
+   `VALKEY_HOST` and `VALKEY_PORT` (and the other `VALKEY_*` variables) to use
+   another server.
+
+   To try the node in a local n8n instance, build it, then link it into n8n's
+   custom nodes directory:
+
+   ```bash
+   npm run build
+   npm link
+   mkdir -p ~/.n8n/custom
+   cd ~/.n8n/custom && npm link n8n-nodes-valkey-vector-store
+   ```
+
+   Restart n8n; the Valkey Vector Store node appears in the node panel.
 
 4. **Make your change**, add or update tests, and sign off every commit (see [DCO](#developer-certificate-of-origin-dco)).
 5. **Open a pull request** following the [pull request guidelines](#pull-request-guidelines).
+
+## Git hooks
+
+Git hooks are managed by [Husky](https://typicode.github.io/husky/) and installed
+automatically when you run `npm install`:
+
+- **`pre-commit`** runs `npm run lint`, `npm run format:check`, `npm run test:unit`,
+  and `npm run test:int`. The integration tests need a running Valkey instance; set
+  `VALKEY_HOST` / `VALKEY_PORT` to point at it, or skip the hook for a single commit
+  with `git commit --no-verify`.
+- **`commit-msg`** adds the DCO `Signed-off-by` trailer when it is missing, then
+  checks the message against [Conventional Commits](https://www.conventionalcommits.org/)
+  with commitlint.
 
 ## License
 
@@ -33,7 +79,8 @@ All commits **must** include a `Signed-off-by` trailer certifying you have the r
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
-Use `git commit -s` (or `--signoff`) to add this automatically. PRs that fail the DCO check will not be merged.
+Use `git commit -s` (or `--signoff`) to add this automatically. The `commit-msg` hook
+also adds it when it is missing. PRs that fail the DCO check will not be merged.
 
 ## Vendor neutrality
 
@@ -72,8 +119,7 @@ fix(insert): handle empty metadata
 docs: update installation section
 ```
 
-Pull requests with non-conforming commit messages will fail CI. The enforcement details (a
-Husky `commit-msg` hook and the CI check) will be added in #3.
+Pull requests with non-conforming commit messages will fail CI.
 
 Always sign off: `git commit -s`.
 
