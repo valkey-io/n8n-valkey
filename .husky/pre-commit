@@ -1,7 +1,6 @@
 #!/bin/sh
-# Runs before every commit. Install it once per clone with `npm run hooks:install`,
-# which sets `git config core.hooksPath .githooks`.
-# Skip once with `git commit --no-verify`.
+# Runs before every commit. Installed automatically by Husky via the `prepare`
+# script on `npm install`. Skip once with `git commit --no-verify`.
 set -e
 
 echo "pre-commit: npm run lint"

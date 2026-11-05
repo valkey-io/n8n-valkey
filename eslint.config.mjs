@@ -19,6 +19,12 @@ export default [
 			// a second bundled copy would break instanceof checks between them.
 			// The rule only knows about n8n-workflow and @n8n/ai-node-sdk.
 			'@n8n/community-nodes/valid-peer-dependencies': 'off',
+			// Husky installs this repo's git hooks via the `prepare` script. The
+			// rule bans lifecycle scripts because they run on an n8n host at install
+			// time, but `prepare` runs only in a local development clone; npm skips
+			// it when the package is installed from the registry, so it never
+			// executes on a user's host.
+			'@n8n/community-nodes/no-forbidden-lifecycle-scripts': 'off',
 		},
 	},
 	{
