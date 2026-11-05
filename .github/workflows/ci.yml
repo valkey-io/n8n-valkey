@@ -144,6 +144,9 @@ jobs:
       VALKEY_IMAGE: ${{ matrix.image }}
       # Nodes use 7000-7002; cluster bus 17000-17002; coordinator 27294-27296.
       CLUSTER_BASE_PORT: 7000
+      # Password for the cluster, so the auth path (and the wrong-password test)
+      # is exercised, matching the standalone integration job.
+      CLUSTER_PASSWORD: ci-test-password
 
     steps:
       - uses: actions/checkout@v4
@@ -176,6 +179,8 @@ jobs:
           loadmodule /usr/lib/valkey/libsearch.so --use-coordinator
           port $port
           cluster-announce-ip 127.0.0.1
+          requirepass $CLUSTER_PASSWORD
+          primaryauth $CLUSTER_PASSWORD
           EOF
             docker run -d --name "valkey-cluster-$i" --network host \
               -v "$CONF_DIR:/conf:ro" \
@@ -186,7 +191,7 @@ jobs:
           for i in 1 2 3; do
             port=$((CLUSTER_BASE_PORT + i - 1))
             for _ in $(seq 1 60); do
-              [ "$(docker exec "valkey-cluster-$i" valkey-cli -p "$port" ping 2>/dev/null | tr -d '\r')" = PONG ] && break
+              [ "$(docker exec "valkey-cluster-$i" valkey-cli -a "$CLUSTER_PASSWORD" --no-auth-warning -p "$port" ping 2>/dev/null | tr -d '\r')" = PONG ] && break
               sleep 1
             done
           done
@@ -195,14 +200,14 @@ jobs:
           addrs=""
           for i in 1 2 3; do addrs="$addrs 127.0.0.1:$((CLUSTER_BASE_PORT + i - 1))"; done
           # shellcheck disable=SC2086
-          docker exec valkey-cluster-1 valkey-cli --cluster create $addrs \
+          docker exec valkey-cluster-1 valkey-cli -a "$CLUSTER_PASSWORD" --no-auth-warning --cluster create $addrs \
             --cluster-replicas 0 --cluster-yes
 
           # Wait for cluster_state:ok, and confirm the coordinator loaded.
           for i in 1 2 3; do
             port=$((CLUSTER_BASE_PORT + i - 1))
             for _ in $(seq 1 60); do
-              state="$(docker exec "valkey-cluster-$i" valkey-cli -p "$port" cluster info 2>/dev/null | tr -d '\r' | grep '^cluster_state:' || true)"
+              state="$(docker exec "valkey-cluster-$i" valkey-cli -a "$CLUSTER_PASSWORD" --no-auth-warning -p "$port" cluster info 2>/dev/null | tr -d '\r' | grep '^cluster_state:' || true)"
               [ "$state" = cluster_state:ok ] && break
               sleep 1
             done
@@ -220,6 +225,7 @@ jobs:
             (async () => {
               const client = await GlideClusterClient.createClient({
                 addresses: [{ host: '127.0.0.1', port: Number(process.env.CLUSTER_BASE_PORT) }],
+                credentials: { password: process.env.CLUSTER_PASSWORD },
               });
               // A cluster client returns a per-node record of INFO replies, not
               // a single string; join them so the version regex works.
@@ -238,6 +244,7 @@ jobs:
           VALKEY_HOST: 127.0.0.1
           VALKEY_PORT: 7000
           VALKEY_CLUSTER: 'true'
+          VALKEY_PASSWORD: ci-test-password
 
       - name: Stop Valkey cluster
         if: always()
