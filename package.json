@@ -2,7 +2,7 @@
     "name": "n8n-nodes-valkey-vector-store",
     "version": "0.1.0",
     "description": "n8n vector store node for Valkey with ValkeySearch (standalone, self-hosted n8n)",
-    "license": "MIT",
+    "license": "BSD-3-Clause",
     "homepage": "https://github.com/valkey-io/n8n-valkey",
     "keywords": [
         "n8n-community-node-package"

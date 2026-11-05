@@ -10,6 +10,9 @@ export default [
 			// dist. The package is self-hosted only (see the OpenSpec change
 			// add-valkey-vector-store-node, proposal "Dependencies").
 			'@n8n/community-nodes/no-runtime-dependencies': 'off',
+			// The node is licensed BSD-3-Clause to match the Valkey project; the
+			// n8n rule expects the community-node default (MIT).
+			'n8n-nodes-base/community-package-json-license-not-default': 'off',
 			// @langchain/core and @n8n/ai-utilities must resolve to the copies the
 			// n8n host already loads: createVectorStoreNode and the Document,
 			// Embeddings and VectorStore classes are shared with n8n's AI nodes, so
