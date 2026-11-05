@@ -352,6 +352,61 @@ describeIntegration('Valkey integration', () => {
 				'SCHEMA',
 				...schema,
 			]);
+			// On a valkey-search 1.0.3 coordinator cluster, FT.CREATE returns before
+			// every primary has the index, so a document written in that window stays
+			// unsearchable. The node's own index creation waits for this via the
+			// library's addVectors; a raw FT.CREATE here must do the same, or an
+			// insert-then-search in this test races the propagation. 1.2+ has the
+			// index on the first FT.INFO, and standalone has a single primary.
+			await waitForIndexOnAllPrimaries(config.indexName);
+		}
+
+		/**
+		 * Waits until every non-failed primary of the cluster answers FT.INFO for
+		 * the index. No-op on a standalone client. Mirrors @langchain/valkey's
+		 * waitForIndexOnAllPrimaries (not exported), with the same 10s timeout and
+		 * 10ms retry.
+		 */
+		async function waitForIndexOnAllPrimaries(
+			indexName: string,
+			timeoutMs = 10_000,
+		): Promise<void> {
+			if (!(client instanceof GlideClusterClient)) return;
+			const cluster = client;
+			const nodes = String(
+				await cluster.customCommand(['CLUSTER', 'NODES'], { route: 'randomNode' }),
+			);
+			const primaries: Array<{ host: string; port: number }> = [];
+			for (const line of nodes.split('\n')) {
+				const parts = line.trim().split(' ');
+				if (parts.length < 3) continue;
+				const flags = parts[2].split(',');
+				if (!flags.includes('master') || flags.includes('fail')) continue;
+				// address is `host:port@cport[,hostname]`; split at the last `:` before `@`.
+				const address = parts[1].split('@')[0];
+				const sep = address.lastIndexOf(':');
+				primaries.push({ host: address.slice(0, sep), port: Number(address.slice(sep + 1)) });
+			}
+			const deadline = Date.now() + timeoutMs;
+			for (const { host, port } of primaries) {
+				for (;;) {
+					try {
+						await cluster.customCommand(['FT.INFO', indexName], {
+							route: { type: 'routeByAddress', host, port },
+						});
+						break;
+					} catch (err) {
+						if (Date.now() >= deadline) {
+							// Test helper, not node code: a plain Error is correct here.
+							// eslint-disable-next-line @n8n/community-nodes/require-node-api-error
+							throw new Error(
+								`index "${indexName}" not on primary ${host}:${port} after ${timeoutMs} ms (${String(err)})`,
+							);
+						}
+						await new Promise((resolve) => setTimeout(resolve, 10));
+					}
+				}
+			}
 		}
 
 		const vectorSchema = (attribute: string) => [
