@@ -1,0 +1,37 @@
+name: Lint Commits
+
+# Checks every commit in a pull request against Conventional Commits, using the
+# same commitlint.config.cjs as the local commit-msg hook. This is the CI half of
+# the two-layer enforcement; the client half is the Husky commit-msg hook.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the PR's base..head commit range can be linted.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Lint commits in this PR
+        run: >-
+          npx commitlint
+          --from ${{ github.event.pull_request.base.sha }}
+          --to ${{ github.event.pull_request.head.sha }}
+          --verbose

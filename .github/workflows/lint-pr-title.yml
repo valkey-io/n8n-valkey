@@ -1,0 +1,31 @@
+name: Lint PR Title
+
+on:
+  # Using pull_request (not pull_request_target) intentionally: title-linting
+  # needs no base-repo secrets. Do not add a checkout of untrusted PR code here.
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            refactor
+            perf
+            test
+            docs
+            build
+            ci
+            style
+            chore
+            revert
