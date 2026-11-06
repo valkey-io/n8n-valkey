@@ -67,9 +67,5 @@
   "dependencies": {
     "@langchain/valkey": "file:vendor/langchain-valkey-0.0.1.tgz",
     "@valkey/valkey-glide": "2.5.2"
-  },
-  "overrides": {
-    "playwright": "1.64.1",
-    "playwright-core": "1.64.1"
   }
 }

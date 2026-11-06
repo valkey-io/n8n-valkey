@@ -25,14 +25,6 @@ export default [
 			// it when the package is installed from the registry, so it never
 			// executes on a user's host.
 			'@n8n/community-nodes/no-forbidden-lifecycle-scripts': 'off',
-			// Pin playwright/playwright-core to a published version. @langchain/community
-			// (via @n8n/ai-utilities) declares an optional playwright peer; npm resolves
-			// it to the newest in-range version, which briefly pointed at an unpublished
-			// playwright-core@1.65.0 and broke `npm ci`. The override only affects this
-			// repo's own dev/CI resolution — npm ignores a dependency's overrides, so it
-			// has no effect when the node is installed as a dependency, which is what the
-			// rule warns about. Remove once playwright-core@1.65.0 (or later) is published.
-			'@n8n/community-nodes/no-overrides-field': 'off',
 		},
 	},
 	{
