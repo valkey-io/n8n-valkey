@@ -4,10 +4,10 @@ import { VectorAlgorithms } from '@langchain/valkey';
 import { ClusterScanCursor, GlideClusterClient, GlideFt } from '@valkey/valkey-glide';
 import type { GlideClient } from '@valkey/valkey-glide';
 
-import { createValkeyClient } from '../../nodes/ValkeyVectorStore/shared/client';
+import { ValkeyVectorStore } from '../../nodes/ValkeyVectorStore/ValkeyVectorStore.node';
 import type { ValkeyClient } from '../../nodes/ValkeyVectorStore/shared/client';
 import { clearIndex } from '../../nodes/ValkeyVectorStore/shared/clearIndex';
-import type { InsertConfig } from '../../nodes/ValkeyVectorStore/shared/config';
+import type { InsertConfig, ValkeyCredentials } from '../../nodes/ValkeyVectorStore/shared/config';
 import { metadataFields, readIndexInfo } from '../../nodes/ValkeyVectorStore/shared/indexSchema';
 import {
 	defaultInsertDeps,
@@ -150,12 +150,33 @@ describeIntegration('Valkey integration', () => {
 		await expect(readIndexInfo(client, 'n8n-test-does-not-exist')).resolves.toBeNull();
 	});
 
-	const itWithPassword = process.env.VALKEY_PASSWORD ? it : it.skip;
+	describe('credential test', () => {
+		const connectionTest = new ValkeyVectorStore().methods!.credentialTest!.valkeyApiConnectionTest;
+		const credential = (overrides: Partial<ValkeyCredentials> = {}) =>
+			({
+				id: '1',
+				name: 'Valkey',
+				type: 'valkeyApi',
+				data: { ...testCredentials(), ...overrides },
+			}) as never;
 
-	itWithPassword('rejects a wrong password with the server error', async () => {
-		await expect(
-			createValkeyClient({ ...testCredentials(), password: 'wrong-password' }),
-		).rejects.toThrow(/WRONGPASS/);
+		it('reports success for the test server', async () => {
+			await expect(connectionTest.call({} as never, credential())).resolves.toEqual({
+				status: 'OK',
+				message: 'Connection successful',
+			});
+		});
+
+		const itWithPassword = process.env.VALKEY_PASSWORD ? it : it.skip;
+
+		itWithPassword('reports a wrong password with the server error', async () => {
+			const result = await connectionTest.call(
+				{} as never,
+				credential({ password: 'wrong-password' }),
+			);
+			expect(result.status).toBe('Error');
+			expect(result.message).toMatch(/WRONGPASS/);
+		});
 	});
 
 	it('inserts without TEXT fields and round-trips content and metadata', async () => {

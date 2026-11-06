@@ -198,6 +198,39 @@ describe('ValkeyVectorStore node', () => {
 		});
 	});
 
+	describe('valkeyApiConnectionTest', () => {
+		const connectionTest = node.methods!.credentialTest!.valkeyApiConnectionTest;
+		const credential = (data: Record<string, unknown>) =>
+			({ id: '1', name: 'Valkey', type: 'valkeyApi', data }) as never;
+
+		afterEach(() => jest.restoreAllMocks());
+
+		it('reports success and closes the client when the server answers PING', async () => {
+			const client = {
+				info: jest.fn(async () => 'cluster_enabled:0\r\n'),
+				ping: jest.fn(async () => 'PONG'),
+				close: jest.fn(),
+			};
+			jest.spyOn(GlideClient, 'createClient').mockResolvedValue(client as never);
+
+			await expect(
+				connectionTest.call({} as never, credential({ host: 'localhost', tls: false })),
+			).resolves.toEqual({ status: 'OK', message: 'Connection successful' });
+			expect(client.ping).toHaveBeenCalled();
+			expect(client.close).toHaveBeenCalledTimes(1);
+		});
+
+		it('reports an invalid credential without connecting', async () => {
+			const createClient = jest.spyOn(GlideClient, 'createClient');
+			const result = await connectionTest.call({} as never, credential({ host: '' }));
+			expect(result).toEqual({
+				status: 'Error',
+				message: 'The Valkey credential has no host set.',
+			});
+			expect(createClient).not.toHaveBeenCalled();
+		});
+	});
+
 	it('never offers TEXT for metadata fields', () => {
 		const json = JSON.stringify(node.description.properties);
 		expect(json).not.toContain('"TEXT"');
