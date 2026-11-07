@@ -46,4 +46,12 @@ export default [
 			'@n8n/community-nodes/require-node-api-error': 'off',
 		},
 	},
+	{
+		files: ['test/e2e/harness.ts'],
+		rules: {
+			// The end-to-end harness runs the n8n CLI and npm in child processes.
+			// It is test code and is not part of the published package.
+			'@n8n/community-nodes/no-dangerous-functions': 'off',
+		},
+	},
 ];

@@ -32,3 +32,19 @@ fi
 
 echo "pre-commit: npm run test:int ($VALKEY_HOST:$VALKEY_PORT)"
 npm run test:int --silent
+
+# End-to-end tests run real n8n workflows. They need the n8n CLI and an Ollama
+# server with the embedding model; see CONTRIBUTING.md. N8N_E2E_BIN defaults to
+# the install location given there. Without the CLI, Jest skips every e2e test
+# and still exits 0, so check it here.
+export N8N_E2E_BIN="${N8N_E2E_BIN:-$HOME/.n8n-e2e/lib/node_modules/n8n/bin/n8n}"
+
+if [ ! -f "$N8N_E2E_BIN" ]; then
+	echo "pre-commit: no n8n CLI at $N8N_E2E_BIN, so the end-to-end tests cannot run." >&2
+	echo "Install it (see \"End-to-end tests\" in CONTRIBUTING.md), set N8N_E2E_BIN," >&2
+	echo "or skip the hook with git commit --no-verify." >&2
+	exit 1
+fi
+
+echo "pre-commit: npm run test:e2e ($VALKEY_HOST:$VALKEY_PORT)"
+npm run test:e2e --silent

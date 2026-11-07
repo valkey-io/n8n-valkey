@@ -1,0 +1,119 @@
+name: E2E
+
+# Runs real n8n workflows with the node against Valkey and Ollama (test/e2e).
+# The job downloads n8n and an Ollama embedding model; the chat model is a stub
+# in the test harness. It runs nightly and on demand rather than on every pull
+# request.
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  N8N_VERSION: '2.35.7'
+  EMBEDDING_MODEL: 'mxbai-embed-large:latest'
+
+jobs:
+  e2e-test:
+    name: e2e-test (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # One job per supported valkey-search line, as in the integration tests.
+    # The valkey-bundle 8.1.x images ship valkey-search 1.0.x; the 9.1.x images
+    # ship valkey-search 1.2.x.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: valkey-search 1.0.x
+            image: valkey/valkey-bundle:8.1.11
+          - label: valkey-search 1.2.x
+            image: valkey/valkey-bundle:9.1.4
+
+    services:
+      valkey:
+        image: ${{ matrix.image }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # n8n's Ollama chat model fails with "fetch failed" on Node.js 26.
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Cache n8n
+        id: n8n-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/n8n
+          key: n8n-global-${{ env.N8N_VERSION }}-${{ runner.os }}-node22
+
+      - name: Install n8n
+        if: steps.n8n-cache.outputs.cache-hit != 'true'
+        # A global install, as with `npm install -g n8n`. n8n ships no lockfile,
+        # and a local install gives its packages separate copies of
+        # @langchain/core, which breaks n8n's Vector Store Retriever.
+        run: 'npm install -g --no-audit --no-fund --prefix "$RUNNER_TEMP/n8n" "n8n@$N8N_VERSION"'
+
+      - name: Install Ollama
+        # Downloads a pinned release and verifies its published SHA-256 before
+        # extracting, instead of piping the install script into a shell.
+        env:
+          OLLAMA_VERSION: v0.40.15
+          OLLAMA_SHA256: 628c018404a4206493efd38e46251c154ede5141b8b8dc85c659b3b027c47379
+        run: |
+          archive="$RUNNER_TEMP/ollama-linux-amd64.tar.zst"
+          curl -fsSL -o "$archive" \
+            "https://github.com/ollama/ollama/releases/download/$OLLAMA_VERSION/ollama-linux-amd64.tar.zst"
+          echo "$OLLAMA_SHA256  $archive" | sha256sum --check --strict
+          zstd -dc "$archive" | sudo tar -xf - -C /usr/local
+          ollama --version
+
+      - name: Cache the Ollama embedding model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-${{ env.EMBEDDING_MODEL }}
+
+      - name: Start Ollama and pull the embedding model
+        run: |
+          OLLAMA_HOST=127.0.0.1:11434 nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl -sf http://127.0.0.1:11434/api/tags > /dev/null && break
+            sleep 1
+          done
+          ollama pull "$EMBEDDING_MODEL"
+
+      - name: Run end-to-end tests
+        run: 'npm run test:e2e'
+        env:
+          VALKEY_HOST: localhost
+          VALKEY_PORT: 6379
+          N8N_E2E_BIN: ${{ runner.temp }}/n8n/lib/node_modules/n8n/bin/n8n
+          OLLAMA_BASE_URL: http://127.0.0.1:11434
+          E2E_EMBEDDING_MODEL: ${{ env.EMBEDDING_MODEL }}
+
+      - name: Show the Ollama log
+        if: failure()
+        run: 'tail -n 200 "$RUNNER_TEMP/ollama.log"'
