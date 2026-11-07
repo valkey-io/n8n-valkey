@@ -2,9 +2,9 @@ name: E2E
 
 # Runs real n8n workflows with the node against Valkey and Ollama (test/e2e).
 # The job downloads n8n and an Ollama embedding model; the chat model is a stub
-# in the test harness. It runs nightly and on demand rather than on every pull
-# request.
+# in the test harness. It runs on pull requests, nightly, and on demand.
 on:
+  pull_request:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
