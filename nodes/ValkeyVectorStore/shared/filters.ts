@@ -1,0 +1,244 @@
+import { SchemaFieldTypes } from '@langchain/valkey';
+import type { CustomSchemaField } from '@langchain/valkey';
+
+import { ValkeyUserError } from './errors';
+import type { MetadataField, MetadataFieldType } from './indexSchema';
+
+export const TAG_OPERATORS = ['is', 'isAnyOf'] as const;
+export const NUMERIC_OPERATORS = ['equals', 'gte', 'lte', 'between'] as const;
+
+export type TagOperator = (typeof TAG_OPERATORS)[number];
+export type NumericOperator = (typeof NUMERIC_OPERATORS)[number];
+
+export const DEFAULT_TAG_OPERATOR: TagOperator = 'is';
+export const DEFAULT_NUMERIC_OPERATOR: NumericOperator = 'gte';
+
+/** Operator names as the Operator dropdown shows them, without the type suffix. */
+const OPERATOR_NAMES: Record<TagOperator | NumericOperator, string> = {
+	is: 'Is',
+	isAnyOf: 'Is Any Of',
+	equals: 'Equals',
+	gte: 'Greater Than or Equal',
+	lte: 'Less Than or Equal',
+	between: 'Between',
+};
+
+function operatorList(operators: readonly string[]): string {
+	const names = operators.map((op) => `"${OPERATOR_NAMES[op as TagOperator | NumericOperator]}"`);
+	return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+/**
+ * Returns the row's operator after checking it against the field's type in
+ * the index. The editor cannot know the type when Field is an expression, so
+ * this run-time check is the one that decides. A row without an operator
+ * uses the type's default.
+ */
+function readOperator(
+	row: FilterConditionRow,
+	type: MetadataFieldType,
+	label: string,
+	name: string,
+): string {
+	const allowed: readonly string[] = type === 'TAG' ? TAG_OPERATORS : NUMERIC_OPERATORS;
+	const fallback = type === 'TAG' ? DEFAULT_TAG_OPERATOR : DEFAULT_NUMERIC_OPERATOR;
+	const raw = row.operator;
+	const operator = raw === undefined || raw === null || raw === '' ? fallback : String(raw);
+	if (!allowed.includes(operator)) {
+		const shown = OPERATOR_NAMES[operator as TagOperator | NumericOperator] ?? operator;
+		throw new ValkeyUserError(
+			`${label}: operator "${shown}" is not valid for ${type} field "${name}". Use ${operatorList(allowed)}.`,
+			'invalid-filter',
+		);
+	}
+	return operator;
+}
+
+/** One row of the Metadata Filter list, as returned by getNodeParameter. */
+export interface FilterConditionRow {
+	field?: unknown;
+	operator?: unknown;
+	value?: unknown;
+	valueTo?: unknown;
+}
+
+export type NumericRange = { min?: number; max?: number };
+export type MetadataFilter = Record<string, string | string[] | NumericRange>;
+
+/**
+ * True when `object` has `key` itself, not through its prototype. Field names
+ * come from the index or the user, so a field can be named like an
+ * Object.prototype member (`constructor`, `toString`, `__proto__`).
+ */
+export function hasOwn(object: object, key: string): boolean {
+	return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+/**
+ * customSchema for the library, built from the index's own TAG/NUMERIC fields.
+ * A TAG field's separator decides how the library joins array values.
+ */
+export function toCustomSchema(fields: MetadataField[]): Record<string, CustomSchemaField> {
+	// No prototype, so a field named `__proto__` becomes an ordinary key.
+	const schema: Record<string, CustomSchemaField> = Object.create(null);
+	for (const field of fields) {
+		if (field.type !== 'TAG') {
+			schema[field.name] = { type: SchemaFieldTypes.NUMERIC };
+			continue;
+		}
+		const tag: CustomSchemaField = { type: SchemaFieldTypes.TAG };
+		if (field.separator !== undefined) tag.SEPARATOR = field.separator;
+		if (field.caseSensitive) tag.CASESENSITIVE = true;
+		schema[field.name] = tag;
+	}
+	return schema;
+}
+
+function parseNumber(label: string, value: unknown): number {
+	const text = typeof value === 'number' ? String(value) : String(value ?? '').trim();
+	const number = Number(text);
+	if (text === '' || !Number.isFinite(number)) {
+		throw new ValkeyUserError(
+			`${label}: the value must be a number, got "${String(value ?? '')}".`,
+			'invalid-filter',
+		);
+	}
+	return number;
+}
+
+/**
+ * Converts one TAG filter value to text. Objects, nested arrays, null and
+ * undefined are rejected: String() would turn them into tags such as
+ * "[object Object]" or "undefined", and the search would run without error.
+ */
+function tagValueText(label: string, value: unknown): string {
+	if (typeof value === 'string') return value;
+	if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+	const described =
+		value === undefined || value === null
+			? String(value)
+			: `${JSON.stringify(value)} (${Array.isArray(value) ? 'list' : typeof value})`;
+	throw new ValkeyUserError(
+		`${label}: TAG values must be text or a list of text, got ${described}.`,
+		'invalid-filter',
+	);
+}
+
+function parseTagValues(label: string, value: unknown, many: boolean): string[] {
+	let values: string[];
+	if (Array.isArray(value)) {
+		values = value.map((v) => tagValueText(label, v).trim());
+	} else if (value === undefined || value === null) {
+		values = [];
+	} else {
+		const text = tagValueText(label, value);
+		values = many ? text.split(',').map((v) => v.trim()) : [text.trim()];
+	}
+	values = values.filter((v) => v !== '');
+	if (values.length === 0)
+		throw new ValkeyUserError(`${label}: the value is empty.`, 'invalid-filter');
+	return values;
+}
+
+/**
+ * Validates the Metadata Filter rows against the index's TAG/NUMERIC fields and
+ * converts them to the library's metadataFilter. Conditions are ANDed.
+ *
+ * Validation uses the index's real field types, so fields and operators
+ * supplied by expressions are checked as well.
+ */
+export function buildMetadataFilter(
+	rows: FilterConditionRow[],
+	indexFields: MetadataField[],
+	indexName: string,
+): MetadataFilter | undefined {
+	if (rows.length === 0) return undefined;
+
+	const byName = new Map<string, MetadataField>(indexFields.map((f) => [f.name, f]));
+	// No prototype, so a field named like an Object.prototype member is never
+	// seen as already set.
+	const filter: MetadataFilter = Object.create(null);
+
+	rows.forEach((row, index) => {
+		const name = String(row.field ?? '').trim();
+		const label = `Metadata Filter condition ${index + 1}${name ? ` ("${name}")` : ''}`;
+
+		if (!name) throw new ValkeyUserError(`${label}: no field selected.`, 'invalid-filter');
+
+		const type = byName.get(name)?.type;
+		if (!type) {
+			throw new ValkeyUserError(
+				`${label}: "${name}" is not an indexed field of index "${indexName}". Filterable fields: ${
+					indexFields.map((f) => `"${f.name}"`).join(', ') || 'none'
+				}.`,
+				'invalid-filter',
+			);
+		}
+
+		if (type === 'TAG') {
+			const operator = readOperator(row, type, label, name);
+			if (hasOwn(filter, name)) {
+				throw new ValkeyUserError(
+					`${label}: field "${name}" already has a condition. Combine the values into one "is any of" condition.`,
+					'invalid-filter',
+				);
+			}
+			const values = parseTagValues(label, row.value, operator === 'isAnyOf');
+			// An array from an expression must not widen "is" into an OR, which could
+			// let a tenant filter match several tenants.
+			if (operator === 'is' && values.length > 1) {
+				throw new ValkeyUserError(
+					`${label}: "Is" takes one value, got ${values.length}. Use "Is Any Of" for several values.`,
+					'invalid-filter',
+				);
+			}
+			// Valkey splits a stored TAG value on the field's separator, so a value
+			// that contains it is indexed as several tags and can never match.
+			const separator = byName.get(name)?.separator ?? ',';
+			const joined = values.find((v) => v.includes(separator));
+			if (joined !== undefined) {
+				const hint =
+					operator === 'is'
+						? 'Use "Is Any Of" with the parts.'
+						: 'Give the parts as separate values.';
+				throw new ValkeyUserError(
+					`${label}: the value "${joined}" contains "${separator}", which separates tags in this field, so it can never match. ${hint}`,
+					'invalid-filter',
+				);
+			}
+			filter[name] = operator === 'is' ? values[0] : values;
+			return;
+		}
+
+		const operator = readOperator(row, type, label, name);
+
+		let range: NumericRange;
+		if (operator === 'equals') {
+			const n = parseNumber(label, row.value);
+			range = { min: n, max: n };
+		} else if (operator === 'gte') {
+			range = { min: parseNumber(label, row.value) };
+		} else if (operator === 'lte') {
+			range = { max: parseNumber(label, row.value) };
+		} else {
+			range = { min: parseNumber(label, row.value), max: parseNumber(label, row.valueTo) };
+		}
+
+		// Several conditions on one NUMERIC field (e.g. >= 2020 and <= 2024) intersect.
+		const existing = hasOwn(filter, name) ? (filter[name] as NumericRange) : undefined;
+		const merged: NumericRange = { ...existing };
+		if (range.min !== undefined)
+			merged.min = merged.min === undefined ? range.min : Math.max(merged.min, range.min);
+		if (range.max !== undefined)
+			merged.max = merged.max === undefined ? range.max : Math.min(merged.max, range.max);
+		if (merged.min !== undefined && merged.max !== undefined && merged.min > merged.max) {
+			throw new ValkeyUserError(
+				`${label}: the conditions on "${name}" can never match (minimum ${merged.min} is greater than maximum ${merged.max}).`,
+				'invalid-filter',
+			);
+		}
+		filter[name] = merged;
+	});
+
+	return filter;
+}

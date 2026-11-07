@@ -1,0 +1,263 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Cancel in-progress runs for the same branch/PR to avoid wasting CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24, 26]
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Run lint
+        run: 'npm run lint'
+
+      - name: Check formatting
+        run: 'npm run format:check'
+
+      - name: Run build
+        run: 'npm run build'
+
+  unit-test:
+    name: unit-test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24, 26]
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Run unit tests
+        # One process: parallel ts-jest workers are OOM-killed in small act/Podman VMs.
+        run: 'npm run test:unit -- --runInBand'
+
+  integration-test:
+    name: integration-test (${{ matrix.label }})
+    runs-on: ubuntu-latest
+
+    # One job per supported valkey-search line. The valkey-bundle 8.1.x images
+    # ship valkey-search 1.0.x; the 9.1.x images ship valkey-search 1.2.x.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: valkey-search 1.0.x
+            image: valkey/valkey-bundle:8.1.11
+          - label: valkey-search 1.2.x
+            image: valkey/valkey-bundle:9.1.4
+
+    services:
+      valkey:
+        # valkey-bundle ships valkey-server with valkey-search loaded (FT.* commands)
+        # and valkey-cli for the health check.
+        image: ${{ matrix.image }}
+        # The image's entrypoint appends VALKEY_EXTRA_FLAGS to valkey-server.
+        # A password lets the wrong-password integration test run.
+        env:
+          VALKEY_EXTRA_FLAGS: --requirepass ci-test-password
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli -a ci-test-password --no-auth-warning ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Show server and search versions
+        run: |
+          node -e "
+            const { GlideClient } = require('@valkey/valkey-glide');
+            (async () => {
+              const client = await GlideClient.createClient({
+                addresses: [{ host: 'localhost', port: 6379 }],
+                credentials: { password: 'ci-test-password' },
+              });
+              const info = String(await client.info());
+              console.log(info.match(/valkey_version:\S+/)[0]);
+              console.log(JSON.stringify(await client.customCommand(['MODULE', 'LIST'])));
+              client.close();
+            })();
+          "
+
+      - name: Run integration tests
+        run: 'npm run test:int -- --runInBand'
+        env:
+          VALKEY_HOST: localhost
+          VALKEY_PORT: 6379
+          VALKEY_PASSWORD: ci-test-password
+
+  cluster-integration-test:
+    name: cluster-integration-test (${{ matrix.label }})
+    runs-on: ubuntu-latest
+
+    # Same valkey-search lines as the standalone integration job. A 3-primary
+    # cluster must be wired up after the nodes start (valkey-cli --cluster
+    # create) and needs valkey-search with --use-coordinator, which a GitHub
+    # services: block cannot express, so the cluster is brought up inline on the
+    # Docker-equipped runner. Host networking: nodes announce 127.0.0.1:<port>.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: valkey-search 1.0.x
+            image: valkey/valkey-bundle:8.1.11
+          - label: valkey-search 1.2.x
+            image: valkey/valkey-bundle:9.1.4
+
+    env:
+      VALKEY_IMAGE: ${{ matrix.image }}
+      # Nodes use 7000-7002; cluster bus 17000-17002; coordinator 27294-27296.
+      CLUSTER_BASE_PORT: 7000
+      # Password for the cluster, so the auth path (and the wrong-password test)
+      # is exercised, matching the standalone integration job.
+      CLUSTER_PASSWORD: ci-test-password
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: 'npm ci'
+
+      - name: Start Valkey cluster
+        run: |
+          set -euo pipefail
+          CONF_DIR="$RUNNER_TEMP/valkey-cluster-conf"
+          mkdir -p "$CONF_DIR"
+          # Each node loads valkey-search with --use-coordinator; without it a
+          # shard searches only its own keys and FT.SEARCH returns partial
+          # results. Host networking, so every node announces 127.0.0.1.
+          for i in 1 2 3; do
+            port=$((CLUSTER_BASE_PORT + i - 1))
+            cat >"$CONF_DIR/node-$i.conf" <<EOF
+          cluster-enabled yes
+          cluster-config-file nodes.conf
+          cluster-node-timeout 5000
+          appendonly no
+          protected-mode no
+          loadmodule /usr/lib/valkey/libsearch.so --use-coordinator
+          port $port
+          cluster-announce-ip 127.0.0.1
+          requirepass $CLUSTER_PASSWORD
+          primaryauth $CLUSTER_PASSWORD
+          EOF
+            docker run -d --name "valkey-cluster-$i" --network host \
+              -v "$CONF_DIR:/conf:ro" \
+              "$VALKEY_IMAGE" valkey-server "/conf/node-$i.conf"
+          done
+
+          # Wait for every node to answer PING.
+          for i in 1 2 3; do
+            port=$((CLUSTER_BASE_PORT + i - 1))
+            for _ in $(seq 1 60); do
+              [ "$(docker exec "valkey-cluster-$i" valkey-cli -a "$CLUSTER_PASSWORD" --no-auth-warning -p "$port" ping 2>/dev/null | tr -d '\r')" = PONG ] && break
+              sleep 1
+            done
+          done
+
+          # Join the nodes into one cluster (3 primaries, no replicas).
+          addrs=""
+          for i in 1 2 3; do addrs="$addrs 127.0.0.1:$((CLUSTER_BASE_PORT + i - 1))"; done
+          # shellcheck disable=SC2086
+          docker exec valkey-cluster-1 valkey-cli -a "$CLUSTER_PASSWORD" --no-auth-warning --cluster create $addrs \
+            --cluster-replicas 0 --cluster-yes
+
+          # Wait for cluster_state:ok, and confirm the coordinator loaded.
+          for i in 1 2 3; do
+            port=$((CLUSTER_BASE_PORT + i - 1))
+            for _ in $(seq 1 60); do
+              state="$(docker exec "valkey-cluster-$i" valkey-cli -a "$CLUSTER_PASSWORD" --no-auth-warning -p "$port" cluster info 2>/dev/null | tr -d '\r' | grep '^cluster_state:' || true)"
+              [ "$state" = cluster_state:ok ] && break
+              sleep 1
+            done
+            [ "$state" = cluster_state:ok ] || { echo "valkey-cluster-$i: $state"; docker logs --tail 30 "valkey-cluster-$i"; exit 1; }
+            logs="$(docker logs "valkey-cluster-$i" 2>&1)"
+            printf '%s\n' "$logs" | grep -F "use_coordinator: true, IsCluster: true" >/dev/null \
+              || { echo "coordinator not loaded on valkey-cluster-$i"; printf '%s\n' "$logs" | tail -30; exit 1; }
+          done
+          echo "Cluster ready ($VALKEY_IMAGE)."
+
+      - name: Show server and search versions
+        run: |
+          node -e "
+            const { GlideClusterClient } = require('@valkey/valkey-glide');
+            (async () => {
+              const client = await GlideClusterClient.createClient({
+                addresses: [{ host: '127.0.0.1', port: Number(process.env.CLUSTER_BASE_PORT) }],
+                credentials: { password: process.env.CLUSTER_PASSWORD },
+              });
+              // A cluster client returns a per-node record of INFO replies, not
+              // a single string; join them so the version regex works.
+              const raw = await client.info();
+              const info = typeof raw === 'string' ? raw : Object.values(raw).join('\n');
+              const version = info.match(/valkey_version:\S+/);
+              console.log(version ? version[0] : 'valkey_version: unknown');
+              console.log(JSON.stringify(await client.customCommand(['MODULE', 'LIST'])));
+              client.close();
+            })();
+          "
+
+      - name: Run integration tests (cluster mode)
+        run: 'npm run test:int -- --runInBand'
+        env:
+          VALKEY_HOST: 127.0.0.1
+          VALKEY_PORT: 7000
+          VALKEY_CLUSTER: 'true'
+          VALKEY_PASSWORD: ci-test-password
+
+      - name: Stop Valkey cluster
+        if: always()
+        run: 'for i in 1 2 3; do docker rm -f "valkey-cluster-$i" || true; done'

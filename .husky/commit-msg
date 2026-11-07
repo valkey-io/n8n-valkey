@@ -1,0 +1,24 @@
+#!/bin/sh
+# Adds a Developer Certificate of Origin (DCO) sign-off for the commit author
+# to the commit message when it is missing, as `git commit -s` would, then
+# checks the message against Conventional Commits with commitlint.
+# Installed automatically by Husky via the `prepare` script on `npm install`.
+# Skip once with `git commit --no-verify`.
+set -e
+
+message_file="$1"
+
+# Leave an empty message alone so that Git still aborts the commit.
+if ! grep -v '^#' "$message_file" | grep -q '[^[:space:]]'; then
+	exit 0
+fi
+
+# Author identity as Git will record it, without the timestamp.
+author=$(git var GIT_AUTHOR_IDENT | sed 's/ [0-9]* [-+][0-9]*$//')
+
+git interpret-trailers --in-place --if-exists addIfDifferent \
+	--trailer "Signed-off-by: $author" "$message_file"
+
+# Enforce Conventional Commits. Runs after the DCO trailer is added so the
+# sign-off never affects the subject-line check.
+npx --no-install commitlint --edit "$message_file"
