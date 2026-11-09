@@ -1,8 +1,8 @@
 name: Security
 
-# Static analysis, secret scanning and a dependency audit. Runs on pull
-# requests, on pushes to main and weekly, and is called by publish.yml so that
-# a release is published only after these checks pass.
+# Static analysis (Semgrep and CodeQL), secret scanning and a dependency audit.
+# Runs on pull requests, on pushes to main and weekly, and is called by
+# publish.yml so that a release is published only after these checks pass.
 on:
   pull_request:
   push:
@@ -66,3 +66,25 @@ jobs:
           cd "$dir"
           npm install --package-lock-only --legacy-peer-deps --ignore-scripts
           npm audit --audit-level=high
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-24.04
+    permissions:
+      # Uploads the results to the repository's code scanning alerts.
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          # Covers both JavaScript and TypeScript. No build is needed: CodeQL
+          # reads the TypeScript sources directly.
+          languages: javascript-typescript
+          build-mode: none
+      - name: Run CodeQL analysis
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          category: '/language:javascript-typescript'
