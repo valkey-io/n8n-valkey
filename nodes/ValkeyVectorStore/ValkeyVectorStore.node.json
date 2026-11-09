@@ -1,0 +1,23 @@
+{
+	"node": "n8n-nodes-valkey-vector-store.vectorStoreValkey",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Data & Storage"],
+	"subcategories": {
+		"AI": ["Vector Stores", "Tools", "Root Nodes"],
+		"Vector Stores": ["Other Vector Stores"],
+		"Tools": ["Other Tools"]
+	},
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/valkey-io/n8n-valkey#credentials"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/valkey-io/n8n-valkey#readme"
+			}
+		]
+	}
+}
